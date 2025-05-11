@@ -1,6 +1,6 @@
-# GameBus-HealthBehaviorMining
+# GameBus Data Analyzer
 
-A framework for extracting health behavior data from the GameBus platform.
+A framework for extracting and analyzing health behavior data from the GameBus platform.
 
 ## Project Structure
 
@@ -14,9 +14,15 @@ GameBus-HealthBehaviorMining/
 │   ├── extraction/                 # Data extraction from GameBus
 │   │   ├── gamebus_client.py       # GameBus API client
 │   │   └── data_collectors.py      # Data collectors for different data types
+│   ├── analysis/                   # Data analysis
+│   │   └── data_analysis.py        # Data analysis script
 │   └── utils/                      # Utility functions
 │       └── logging.py              # Logging utilities
 ├── data_raw/                       # Raw extracted data
+├── data_analysis/                  # Analysis output
+│   ├── statistics/                 # Statistical analysis output
+│   └── visualizations/             # Visualization output
+├── logs/                           # Log files
 └── pipeline.py                     # Main pipeline runner
 ```
 
@@ -30,11 +36,26 @@ GameBus-HealthBehaviorMining/
    - Mood data
    - Notification data
 
-The extraction process includes:
-- Authentication with the GameBus API
-- Retrieving player data for multiple users in parallel
-- Parsing and processing the raw data
-- Saving the processed data to JSON files in the `data_raw` directory
+   The extraction process includes:
+   - Authentication with the GameBus API
+   - Retrieving player data for multiple users in parallel
+   - Parsing and processing the raw data
+   - Saving the processed data to JSON files in the `data_raw` directory
+
+2. **Data Analysis**: Analyze the extracted data to generate insights, including:
+   - Activity patterns and distributions
+   - User engagement and participation
+   - Challenge types and completion rates
+   - Movement types and physical activity metrics
+   - Heart rate data and patterns
+
+   The analysis process includes:
+   - Loading data from Excel files in the `config` directory and JSON files in the `data_raw` directory
+   - Generating descriptive statistics for each variable
+   - Creating visualizations to provide insights
+   - Performing bivariate analyses to explore relationships between variables
+   - Saving visualizations to the `data_analysis/visualizations` directory
+   - Saving statistics to the `data_analysis/statistics` directory
 
 ## Getting Started
 
@@ -52,8 +73,13 @@ pip install -r requirements.txt
 ```
 
 3. Configure the project:
+   For data extraction:
    - Create a `.env` file in the root directory with your GameBus API key (see below)
-   - Copy the .xlsx file with user credentials exported from GameBus Campaigns website into the root directory
+   - Copy the .xlsx file with user credentials exported from GameBus Campaigns website into the `config/` directory and rename to `users.xlsx`
+
+   For data analysis:
+   - Copy campaign description downloaded from GameBus Campaigns website into the `config/` directory and rename to `campaign_desc.xlsx`
+   - Copy campaign data downloaded from GameBus Campaigns website into the `config/` directory and rename to `campaign_data.xlsx`
 
 ### Configuration
 
@@ -121,6 +147,20 @@ Combine multiple options:
 ```
 python pipeline.py --data-types location heartrate --users-file custom_users.xlsx --log-level INFO
 ```
+
+Run data analysis on existing data (skips extraction if data already exists):
+
+```
+python pipeline.py --analyze
+```
+
+Extract data and run analysis in one command:
+
+```
+python pipeline.py --data-types location mood activity heartrate --analyze
+```
+
+Note: When using only the `--analyze` flag without specifying `--user-id` or `--data-types`, the pipeline will skip the extraction step if data already exists in the `data_raw` folder. This allows you to run analysis on previously extracted data without re-extracting it.
 
 ### Performance Optimizations
 

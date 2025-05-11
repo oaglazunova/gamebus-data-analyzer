@@ -1,6 +1,7 @@
 .env
 .venv/
 data_raw/
+data_analysis
 *.xlsx
 
 

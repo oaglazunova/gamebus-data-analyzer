@@ -19,6 +19,7 @@ from src.extraction.data_collectors import (
     NotificationDataCollector
 )
 from src.utils.logging import setup_logging
+from src.analysis.data_analysis import main as run_analysis
 
 def parse_args():
     """Parse command line arguments."""
@@ -34,6 +35,8 @@ def parse_args():
                         help='Logging level')
     parser.add_argument('--users-file', type=str,
                         help='Path to the XLSX file containing user credentials')
+    parser.add_argument('--analyze', action='store_true',
+                        help='Run data analysis after extraction')
 
     return parser.parse_args()
 
@@ -183,49 +186,62 @@ def main():
     logger = setup_logging(log_level=args.log_level)
     logger.info("Starting GameBus Health Behavior Mining Pipeline")
 
-    # Load users
-    users_file = args.users_file if args.users_file else USERS_FILE_PATH
-    users_df = load_users(users_file)
-    logger.info(f"Loaded {len(users_df)} users from {users_file}")
+    # Check if we should run extraction
+    # Skip extraction if only analysis is requested (--analyze flag is set and no other extraction-specific flags)
+    run_extraction_step = not args.analyze or args.user_id is not None or (args.data_types != ['all'])
 
-    # Process specific user or all users
-    if args.user_id:
-        user_row = users_df[users_df['UserID'] == args.user_id].iloc[0]
-        results = run_extraction(user_row, args.data_types)
+    if run_extraction_step:
+        # Load users
+        users_file = args.users_file if args.users_file else USERS_FILE_PATH
+        users_df = load_users(users_file)
+        logger.info(f"Loaded {len(users_df)} users from {users_file}")
+
+        # Process specific user or all users
+        if args.user_id:
+            user_row = users_df[users_df['UserID'] == args.user_id].iloc[0]
+            results = run_extraction(user_row, args.data_types)
+        else:
+            all_results = {}
+
+            # Use a thread pool to process users in parallel
+            max_workers = min(10, len(users_df))  # Limit the number of concurrent workers
+            logger.info(f"Using {max_workers} workers for parallel processing")
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all tasks
+                future_to_user = {
+                    executor.submit(run_extraction, user_row, args.data_types): user_row['email']
+                    for _, user_row in users_df.iterrows()
+                }
+
+                # Process results as they complete
+                completed = 0
+                total = len(future_to_user)
+
+                for future in concurrent.futures.as_completed(future_to_user):
+                    user_email = future_to_user[future]
+                    completed += 1
+
+                    try:
+                        user_results = future.result()
+                        all_results[user_email] = user_results
+                        logger.info(f"Completed user {completed}/{total}: {user_email}")
+                    except Exception as e:
+                        logger.error(f"Error processing user {user_email}: {e}")
+
+                    # Report progress
+                    progress_pct = (completed / total) * 100
+                    logger.info(f"Progress: {progress_pct:.1f}% ({completed}/{total} users)")
+
+        logger.info("Pipeline completed successfully")
     else:
-        all_results = {}
+        logger.info("Skipping data extraction as only analysis was requested")
 
-        # Use a thread pool to process users in parallel
-        max_workers = min(10, len(users_df))  # Limit the number of concurrent workers
-        logger.info(f"Using {max_workers} workers for parallel processing")
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all tasks
-            future_to_user = {
-                executor.submit(run_extraction, user_row, args.data_types): user_row['email']
-                for _, user_row in users_df.iterrows()
-            }
-
-            # Process results as they complete
-            completed = 0
-            total = len(future_to_user)
-
-            for future in concurrent.futures.as_completed(future_to_user):
-                user_email = future_to_user[future]
-                completed += 1
-
-                try:
-                    user_results = future.result()
-                    all_results[user_email] = user_results
-                    logger.info(f"Completed user {completed}/{total}: {user_email}")
-                except Exception as e:
-                    logger.error(f"Error processing user {user_email}: {e}")
-
-                # Report progress
-                progress_pct = (completed / total) * 100
-                logger.info(f"Progress: {progress_pct:.1f}% ({completed}/{total} users)")
-
-    logger.info("Pipeline completed successfully")
+    # Run data analysis if requested
+    if args.analyze:
+        logger.info("Starting data analysis...")
+        run_analysis()
+        logger.info("Data analysis completed")
 
 if __name__ == "__main__":
     main() 

@@ -1,6 +1,6 @@
 # GameBus Data Analyzer
 
-A framework for extracting and analyzing health behavior data from the GameBus platform.
+A script for extracting and analyzing data from the GameBus platform.
 
 ## Project Structure
 

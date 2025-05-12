@@ -5,7 +5,7 @@ A framework for extracting and analyzing health behavior data from the GameBus p
 ## Project Structure
 
 ```
-GameBus-HealthBehaviorMining/
+gamebus-data-analyzer/
 ├── config/                         # Configuration files
 │   ├── credentials.py              # GameBus API credentials
 │   ├── paths.py                    # Path configurations

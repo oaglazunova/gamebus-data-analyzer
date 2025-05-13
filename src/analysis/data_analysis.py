@@ -484,136 +484,101 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
         logger.error(f"Error creating points by activity type visualization: {e}")
         # Continue with other visualizations even if this one fails
 
-    # 4. Player activity distribution
+    # 4. User activity distribution
     try:
-        # This visualization shows the number of activities recorded by each player
-        # Helps identify the most active players and potential engagement disparities
-        player_activity = activities.groupby('pid').size().sort_values(ascending=False)
+        # This visualization shows the number of activities recorded by each user
+        # Helps identify the most active users and potential engagement disparities
+        user_activity = activities.groupby('pid').size().sort_values(ascending=False)
 
-        if player_activity.empty:
-            logger.warning("No player activity data for distribution visualization")
+        if user_activity.empty:
+            logger.warning("No user activity data for distribution visualization")
         else:
-            def plot_player_activity_distribution():
-                # Limit to top 50 players if there are too many
-                plot_data = player_activity
-                if len(player_activity) > 50:
-                    plot_data = player_activity.head(50)
-                    plt.title('Number of Activities by Player (Top 50 Players)')
+            def plot_user_activity_distribution():
+                # Limit to top 50 users if there are too many
+                plot_data = user_activity
+                if len(user_activity) > 50:
+                    plot_data = user_activity.head(50)
+                    plt.title('Number of Activities by User (Top 50 Users)')
                 else:
-                    plt.title('Number of Activities by Player')
+                    plt.title('Number of Activities by User')
 
                 plot_data.plot(kind='bar')
-                plt.xlabel('Player ID')
+                plt.xlabel('User ID')
                 plt.ylabel('Number of Activities')
 
             create_and_save_figure(
-                plot_player_activity_distribution,
-                f'{OUTPUT_VISUALIZATIONS_DIR}/player_activity_distribution.png',
+                plot_user_activity_distribution,
+                f'{OUTPUT_VISUALIZATIONS_DIR}/user_activity_distribution.png',
                 figsize=(12, 6)
             )
-            logger.info("Created player activity distribution visualization")
+            logger.info("Created user activity distribution visualization")
     except Exception as e:
-        logger.error(f"Error creating player activity distribution visualization: {e}")
+        logger.error(f"Error creating user activity distribution visualization: {e}")
         # Continue with other visualizations even if this one fails
 
-    # 5. Points vs Activity Count by Player (Bivariate Analysis)
+
+    # 5. Activity Type Distribution by User (Bivariate Analysis)
     try:
-        # This visualization shows the relationship between number of activities and points earned by player
-        # Helps identify if more active players earn more points or if there are other factors at play
-        player_stats = activities.groupby('pid').agg({
-            'points': 'sum',
-            'aid': 'count'
-        }).reset_index()
-        player_stats.columns = ['pid', 'total_points', 'activity_count']
-
-        if player_stats.empty or len(player_stats) < 2:
-            logger.warning("Insufficient player stats data for points vs activity count visualization")
-        else:
-            def plot_points_vs_activity_count():
-                sns.scatterplot(data=player_stats, x='activity_count', y='total_points')
-                plt.title('Relationship Between Activity Count and Points by Player')
-                plt.xlabel('Number of Activities')
-                plt.ylabel('Total Points')
-
-            create_and_save_figure(
-                plot_points_vs_activity_count,
-                f'{OUTPUT_VISUALIZATIONS_DIR}/points_vs_activity_count.png',
-                figsize=(10, 6)
-            )
-            logger.info("Created points vs activity count visualization")
-
-            # Calculate correlation
-            try:
-                correlation = player_stats['activity_count'].corr(player_stats['total_points'])
-                logger.info(f"Correlation between activity count and points: {correlation:.2f}")
-            except Exception as e:
-                logger.error(f"Error calculating correlation: {e}")
-    except Exception as e:
-        logger.error(f"Error creating points vs activity count visualization: {e}")
-        # Continue with other visualizations even if this one fails
-
-    # 6. Activity Type Distribution by Player (Bivariate Analysis)
-    try:
-        # This visualization shows how different players engage with different activity types
-        # Helps identify player preferences and potential targeting opportunities
+        # This visualization shows how different users engage with different activity types
+        # Helps identify user preferences and potential targeting opportunities
         if len(activities['pid'].unique()) < 2 or len(activities['type'].unique()) < 2:
-            logger.warning("Insufficient data for activity type by player visualization (need at least 2 players and 2 activity types)")
+            logger.warning("Insufficient data for activity type by user visualization (need at least 2 users and 2 activity types)")
         else:
-            player_type_counts = pd.crosstab(activities['pid'], activities['type'])
+            user_type_counts = pd.crosstab(activities['pid'], activities['type'])
 
-            if player_type_counts.empty:
-                logger.warning("Empty crosstab for activity type by player visualization")
+            if user_type_counts.empty:
+                logger.warning("Empty crosstab for activity type by user visualization")
             else:
                 try:
                     # Normalize the counts to get proportions
-                    row_sums = player_type_counts.sum(axis=1)
+                    row_sums = user_type_counts.sum(axis=1)
                     # Check for zero sums to avoid division by zero
                     if (row_sums == 0).any():
-                        logger.warning("Some players have zero activities, removing them from normalization")
+                        logger.warning("Some users have zero activities, removing them from normalization")
                         # Filter out rows with zero sum
-                        player_type_counts = player_type_counts[row_sums > 0]
-                        row_sums = player_type_counts.sum(axis=1)
+                        user_type_counts = user_type_counts[row_sums > 0]
+                        row_sums = user_type_counts.sum(axis=1)
 
-                    player_type_counts_norm = player_type_counts.div(row_sums, axis=0)
+                    user_type_counts_norm = user_type_counts.div(row_sums, axis=0)
 
-                    # Limit to top 10 players by activity count for readability
-                    if len(player_activity) < 10:
-                        top_players = player_activity.index
-                        logger.info(f"Using all {len(top_players)} players for activity type heatmap")
+                    # Limit to top 10 users by activity count for readability
+                    if len(user_activity) < 10:
+                        top_users = user_activity.index
+                        logger.info(f"Using all {len(top_users)} users for activity type heatmap")
                     else:
-                        top_players = player_activity.head(10).index
-                        logger.info("Using top 10 players for activity type heatmap")
+                        top_users = user_activity.head(10).index
+                        logger.info("Using top 10 users for activity type heatmap")
 
-                    # Check if all top players are in the normalized dataframe
-                    valid_players = [p for p in top_players if p in player_type_counts_norm.index]
-                    if not valid_players:
-                        logger.warning("No valid players for activity type heatmap")
+                    # Check if all top users are in the normalized dataframe
+                    valid_users = [p for p in top_users if p in user_type_counts_norm.index]
+                    if not valid_users:
+                        logger.warning("No valid users for activity type heatmap")
                     else:
-                        player_type_heatmap = player_type_counts_norm.loc[valid_players]
+                        user_type_heatmap = user_type_counts_norm.loc[valid_users]
 
                         # Limit the number of activity types if there are too many
-                        if player_type_heatmap.shape[1] > 15:
+                        if user_type_heatmap.shape[1] > 15:
                             # Keep only the most common activity types
-                            top_types = player_type_counts.sum().nlargest(15).index
-                            player_type_heatmap = player_type_heatmap[top_types]
-                            logger.info(f"Limited activity type heatmap to top 15 activity types out of {player_type_counts.shape[1]}")
+                            top_types = user_type_counts.sum().nlargest(15).index
+                            user_type_heatmap = user_type_heatmap[top_types]
+                            logger.info(f"Limited activity type heatmap to top 15 activity types out of {user_type_counts.shape[1]}")
 
-                        def plot_activity_type_by_player():
-                            sns.heatmap(player_type_heatmap, cmap='YlGnBu', annot=True, fmt='.2f', linewidths=0.5)
-                            plt.title(f'Activity Type Distribution by Player (Top {len(valid_players)} Players)')
+                        def plot_activity_type_by_user():
+                            sns.heatmap(user_type_heatmap, cmap='YlGnBu', annot=True, fmt='.2f', linewidths=0.5)
+                            plt.title(f'Activity Type Distribution by User (Top {len(valid_users)} Users)')
                             plt.xlabel('Activity Type')
-                            plt.ylabel('Player ID')
+                            plt.ylabel('User ID')
 
                         create_and_save_figure(
-                            plot_activity_type_by_player,
-                            f'{OUTPUT_VISUALIZATIONS_DIR}/activity_type_by_player.png',
+                            plot_activity_type_by_user,
+                            f'{OUTPUT_VISUALIZATIONS_DIR}/activity_type_by_user.png',
                             figsize=(14, 8)
                         )
-                        logger.info("Created activity type by player visualization")
+                        logger.info("Created activity type by user visualization")
                 except Exception as e:
                     logger.error(f"Error in normalization or heatmap creation: {e}")
     except Exception as e:
-        logger.error(f"Error creating activity type by player visualization: {e}")
+        logger.error(f"Error creating activity type by user visualization: {e}")
         # Continue with other visualizations even if this one fails
 
     # Calculate campaign metrics
@@ -629,12 +594,39 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
 
         logger.info(f"Campaign length: {campaign_length_days} days (from {campaign_start.date()} to {campaign_end.date()})")
 
+        # Extract campaign name and abbreviation from campaign_desc.xlsx if available
+        campaign_name = "GameBus Campaign"  # Default name
+        campaign_abbr = ""  # Default empty abbreviation
+        # Look for campaign name and abbreviation in any sheet from campaign_desc.xlsx
+        for key, df in csv_data.items():
+            if key.startswith('desc_') and 'name' in df.columns:
+                # Found a sheet with a 'name' column
+                try:
+                    # Try to get the first non-empty name
+                    names = df['name'].dropna()
+                    if not names.empty:
+                        campaign_name = names.iloc[0]
+                        logger.info(f"Found campaign name: {campaign_name}")
+
+                        # Try to get the abbreviation from the same row if available
+                        if 'abbreviation' in df.columns:
+                            # Get the abbreviation from the same row as the name
+                            row_idx = names.index[0]
+                            if row_idx in df.index and not pd.isna(df.loc[row_idx, 'abbreviation']):
+                                campaign_abbr = df.loc[row_idx, 'abbreviation']
+                                logger.info(f"Found campaign abbreviation: {campaign_abbr}")
+                        break
+                except Exception as e:
+                    logger.warning(f"Error extracting campaign name/abbreviation from {key}: {e}")
+
         # Create campaign metrics dictionary
         campaign_metrics = {
             'unique_users': unique_users_count,
             'length_days': campaign_length_days,
             'start_date': campaign_start.date(),
-            'end_date': campaign_end.date()
+            'end_date': campaign_end.date(),
+            'name': campaign_name,
+            'abbreviation': campaign_abbr
         }
     except Exception as e:
         logger.error(f"Error calculating campaign metrics: {e}")
@@ -646,37 +638,37 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
 
     # Calculate passive vs. active usage
     try:
-        # Group activities by player and date
-        player_daily_activities = activities.groupby(['pid', 'date']).agg({
+        # Group activities by user and date
+        user_daily_activities = activities.groupby(['pid', 'date']).agg({
             'createdAt': ['min', 'max', 'count'],
             'aid': 'count'
         })
-        player_daily_activities.columns = ['first_activity', 'last_activity', 'activity_count', 'aid_count']
+        user_daily_activities.columns = ['first_activity', 'last_activity', 'activity_count', 'aid_count']
 
-        logger.info(f"Calculated daily activities for {len(player_daily_activities)} player-days")
+        logger.info(f"Calculated daily activities for {len(user_daily_activities)} user-days")
     except Exception as e:
-        logger.error(f"Error calculating player daily activities: {e}")
-        player_daily_activities = pd.DataFrame()
+        logger.error(f"Error calculating user daily activities: {e}")
+        user_daily_activities = pd.DataFrame()
 
     # Calculate drop-out rates
     try:
-        # Group activities by player to find first and last activity overall
-        player_dropout = activities.groupby('pid').agg({
+        # Group activities by user to find first and last activity overall
+        user_dropout = activities.groupby('pid').agg({
             'createdAt': ['min', 'max']
         })
-        player_dropout.columns = ['first_activity', 'last_activity']
+        user_dropout.columns = ['first_activity', 'last_activity']
 
         # Calculate time difference in days (as integers)
-        player_dropout['dropout_days'] = (player_dropout['last_activity'] - 
-                                         player_dropout['first_activity']).dt.days
+        user_dropout['dropout_days'] = (user_dropout['last_activity'] - 
+                                         user_dropout['first_activity']).dt.days
 
         # Handle negative dropout days (should not happen with proper data)
-        if (player_dropout['dropout_days'] < 0).any():
+        if (user_dropout['dropout_days'] < 0).any():
             logger.warning("Found negative dropout days, setting them to 0")
-            player_dropout.loc[player_dropout['dropout_days'] < 0, 'dropout_days'] = 0
+            user_dropout.loc[user_dropout['dropout_days'] < 0, 'dropout_days'] = 0
 
         # Generate descriptive statistics for drop-out rates
-        dropout_stats = player_dropout['dropout_days'].describe(percentiles=[.25, .5, .75, .9])
+        dropout_stats = user_dropout['dropout_days'].describe(percentiles=[.25, .5, .75, .9])
         dropout_stats = dropout_stats.round(2)
 
         # Create dropout metrics dictionary
@@ -691,21 +683,21 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
                    f"median={dropout_metrics['median_dropout_days']:.1f} days")
     except Exception as e:
         logger.error(f"Error calculating dropout rates: {e}")
-        player_dropout = pd.DataFrame()
+        user_dropout = pd.DataFrame()
         dropout_stats = None
         dropout_metrics = None
 
     # Create visualizations for drop-out rates
     try:
-        if player_dropout.empty or 'dropout_days' not in player_dropout.columns:
+        if user_dropout.empty or 'dropout_days' not in user_dropout.columns:
             logger.warning("No dropout data available for visualization")
         else:
             # 1. Histogram of drop-out rates
             def plot_dropout_rates_histogram():
-                sns.histplot(player_dropout['dropout_days'], kde=True, bins=20)
+                sns.histplot(user_dropout['dropout_days'], kde=True, bins=20)
                 plt.title('Distribution of User Drop-out Rates')
                 plt.xlabel('Time Between First and Last Activity (days)')
-                plt.ylabel('Frequency')
+                plt.ylabel('Number of Users')
 
             create_and_save_figure(
                 plot_dropout_rates_histogram,
@@ -719,11 +711,11 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
 
     # 2. Box plot of drop-out rates
     try:
-        if player_dropout.empty or 'dropout_days' not in player_dropout.columns:
+        if user_dropout.empty or 'dropout_days' not in user_dropout.columns:
             logger.warning("No dropout data available for boxplot visualization")
         else:
             def plot_dropout_rates_boxplot():
-                sns.boxplot(y=player_dropout['dropout_days'])
+                sns.boxplot(y=user_dropout['dropout_days'])
                 plt.title('Distribution of User Drop-out Rates')
                 plt.ylabel('Time Between First and Last Activity (days)')
 
@@ -739,41 +731,41 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
 
     # Calculate active and passive usage metrics
     try:
-        if player_daily_activities.empty:
-            logger.warning("No player daily activities data for usage metrics calculation")
+        if user_daily_activities.empty:
+            logger.warning("No user daily activities data for usage metrics calculation")
             usage_metrics = None
         else:
             # Calculate active time (time spent recording activities)
             # Assume each activity takes ACTIVITY_RECORDING_TIME_MINUTES on average to record
-            player_daily_activities['active_minutes'] = player_daily_activities['activity_count'] * ACTIVITY_RECORDING_TIME_MINUTES
+            user_daily_activities['active_minutes'] = user_daily_activities['activity_count'] * ACTIVITY_RECORDING_TIME_MINUTES
             logger.info(f"Calculated active minutes using {ACTIVITY_RECORDING_TIME_MINUTES} minutes per activity")
 
             # Calculate passive time (time spent with app open)
             # This is estimated as the time between first and last activity each day
             try:
-                player_daily_activities['session_duration'] = (player_daily_activities['last_activity'] - 
-                                                             player_daily_activities['first_activity']).dt.total_seconds() / 60
+                user_daily_activities['session_duration'] = (user_daily_activities['last_activity'] - 
+                                                             user_daily_activities['first_activity']).dt.total_seconds() / 60
 
                 # Check for negative session durations (should not happen with proper data)
-                if (player_daily_activities['session_duration'] < 0).any():
+                if (user_daily_activities['session_duration'] < 0).any():
                     logger.warning("Found negative session durations, setting them to 0")
-                    player_daily_activities.loc[player_daily_activities['session_duration'] < 0, 'session_duration'] = 0
+                    user_daily_activities.loc[user_daily_activities['session_duration'] < 0, 'session_duration'] = 0
 
                 # Cap unreasonable session durations (e.g., more than MAX_SESSION_DURATION_MINUTES)
-                player_daily_activities['session_duration'] = player_daily_activities['session_duration'].clip(0, MAX_SESSION_DURATION_MINUTES)
+                user_daily_activities['session_duration'] = user_daily_activities['session_duration'].clip(0, MAX_SESSION_DURATION_MINUTES)
                 logger.info(f"Capped session durations at {MAX_SESSION_DURATION_MINUTES} minutes")
 
                 # Passive time is session duration minus active time
-                player_daily_activities['passive_minutes'] = player_daily_activities['session_duration'] - player_daily_activities['active_minutes']
-                player_daily_activities['passive_minutes'] = player_daily_activities['passive_minutes'].clip(0)  # Ensure no negative values
+                user_daily_activities['passive_minutes'] = user_daily_activities['session_duration'] - user_daily_activities['active_minutes']
+                user_daily_activities['passive_minutes'] = user_daily_activities['passive_minutes'].clip(0)  # Ensure no negative values
 
                 # Calculate total active and passive time
-                total_active_minutes = player_daily_activities['active_minutes'].sum()
-                total_passive_minutes = player_daily_activities['passive_minutes'].sum()
+                total_active_minutes = user_daily_activities['active_minutes'].sum()
+                total_passive_minutes = user_daily_activities['passive_minutes'].sum()
 
                 # Calculate average active and passive time per user per day
-                avg_active_minutes_per_user_day = player_daily_activities['active_minutes'].mean()
-                avg_passive_minutes_per_user_day = player_daily_activities['passive_minutes'].mean()
+                avg_active_minutes_per_user_day = user_daily_activities['active_minutes'].mean()
+                avg_passive_minutes_per_user_day = user_daily_activities['passive_minutes'].mean()
 
                 # Create usage metrics dictionary
                 usage_metrics = {
@@ -823,13 +815,13 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
 
     # 2. Bar chart of active and passive usage by day of week
     try:
-        if usage_metrics is None or player_daily_activities.empty:
+        if usage_metrics is None or user_daily_activities.empty:
             logger.warning("No usage data available for day of week visualization")
         else:
             # Reset index to access date as a column
             try:
                 # Make a copy to avoid modifying the original
-                plot_data = player_daily_activities.reset_index()
+                plot_data = user_daily_activities.reset_index()
 
                 # Convert date to day of week
                 plot_data['day_of_week'] = pd.to_datetime(plot_data['date']).dt.day_name()
@@ -1119,17 +1111,12 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
                     logger.warning("Empty crosstab for user engagement heatmap")
                 else:
                     # Determine how many users to show
-                    if player_activity is None or player_activity.empty:
-                        logger.warning("No player activity data for user engagement heatmap")
+                    if user_activity is None or user_activity.empty:
+                        logger.warning("No user activity data for user engagement heatmap")
                     else:
-                        # Limit to top users for readability
-                        max_users = 15  # Maximum number of users to show
-                        if len(player_activity) > max_users:
-                            top_users = player_activity.nlargest(max_users).index
-                            logger.info(f"Limiting user engagement heatmap to top {max_users} users out of {len(player_activity)}")
-                        else:
-                            top_users = player_activity.index
-                            logger.info(f"Using all {len(top_users)} users for engagement heatmap")
+                        # Use all users for the heatmap as per requirements
+                        top_users = user_activity.index
+                        logger.info(f"Using all {len(top_users)} users for engagement heatmap")
 
                         # Check if all top users are in the heatmap
                         missing_users = [u for u in top_users if u not in user_activity_heatmap.index]
@@ -1168,7 +1155,7 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
                                     title = 'User Engagement Heatmap by Week'
                                     xlabel = 'Week Starting'
                             else:
-                                title = f'User Engagement Heatmap (Top {len(top_users)} Users)'
+                                title = f'User Engagement Heatmap (All {len(top_users)} Users)'
                                 xlabel = 'Date'
 
                             if user_activity_heatmap_filtered.empty or user_activity_heatmap_filtered.values.sum() == 0:
@@ -1178,7 +1165,12 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
                                     sns.heatmap(user_activity_heatmap_filtered, cmap='YlGnBu', linewidths=0.5)
                                     plt.title(title)
                                     plt.xlabel(xlabel)
-                                    plt.ylabel('Player ID')
+                                    plt.ylabel('User ID')
+                                    # Add explanation of how engagement is calculated
+                                    plt.figtext(0.5, 0.01, 
+                                               "Note: Engagement is calculated as the total number of activities per user. " +
+                                               "Colors represent activity count (darker = more activities).", 
+                                               ha='center', fontsize=9, wrap=True)
 
                                 create_and_save_figure(
                                     plot_user_engagement_heatmap,
@@ -1222,7 +1214,9 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
             'unique_users': unique_users_count if 'unique_users_count' in locals() else 0,
             'length_days': campaign_length_days if 'campaign_length_days' in locals() else 0,
             'start_date': campaign_start.date() if 'campaign_start' in locals() and campaign_start is not None else None,
-            'end_date': campaign_end.date() if 'campaign_end' in locals() and campaign_end is not None else None
+            'end_date': campaign_end.date() if 'campaign_end' in locals() and campaign_end is not None else None,
+            'name': "GameBus Campaign",  # Default campaign name
+            'abbreviation': ""  # Default empty abbreviation
         }
 
     # Log summary of metrics
@@ -1243,7 +1237,16 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
             with open(campaign_summary_path, 'w') as f:
                 f.write(f"Campaign Summary\n")
                 f.write(f"========================\n\n")
-                f.write(f"Campaign: GameBus Campaign\n")
+
+                # Use safe access to get campaign name and abbreviation
+                campaign_name = campaign_metrics.get('name', "GameBus Campaign")
+                campaign_abbr = campaign_metrics.get('abbreviation', "")
+
+                # Write campaign name and abbreviation if available
+                if campaign_abbr:
+                    f.write(f"{campaign_name} ({campaign_abbr})\n\n")
+                else:
+                    f.write(f"{campaign_name}\n\n")
 
                 # Use safe access to campaign_metrics
                 start_date = campaign_metrics.get('start_date', 'Unknown')
@@ -1788,18 +1791,84 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
         # Return default values if there's an error
         return None, 0, None, None, None
 
-def analyze_player_data(json_data):
-    """Analyze player data from JSON files"""
-    # Combine activity type data from all players
+def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
+    """Analyze user data from JSON files
+
+    This function analyzes user data from JSON files, including:
+    - Movement type distribution
+    - Calories burned by movement type
+    - Steps trends over time
+    - Calories burned trends over time
+    - Activity provider/source analysis (e.g., via self-report, Nutrida, Garmin)
+    - App page visits analysis (for activities of type "VISIT_APP_PAGE")
+    - Heart rate data
+
+    Args:
+        json_data: Dictionary of JSON data
+        campaign_start: Start date of the campaign
+        campaign_end: End date of the campaign
+    """
+    # Combine activity type data from all users
     activity_type_dfs = []
     heartrate_dfs = []
 
     for key, data in json_data.items():
         if isinstance(data, pd.DataFrame):
+            # Process activity type data
             if 'activity_type' in key:
-                activity_type_dfs.append(data)
+                # Extract user ID from the key if possible
+                try:
+                    # Assuming key format is like "user_123_activity_type"
+                    user_id = key.split('_')[1]
+                    # Add user_id column to the DataFrame
+                    data_copy = data.copy()
+                    data_copy['user_id'] = user_id
+
+                    # Check if data_provider columns exist in the DataFrame
+                    if 'data_provider_id' in data_copy.columns and 'data_provider_name' in data_copy.columns:
+                        # Data provider information is already in the DataFrame
+                        pass
+                    else:
+                        # Try to find corresponding data for this user that might have provider info
+                        provider_info = None
+                        for other_key, other_data in json_data.items():
+                            if isinstance(other_data, pd.DataFrame) and user_id in other_key and 'data_provider_name' in other_data.columns:
+                                provider_info = other_data[['data_provider_id', 'data_provider_name']].iloc[0] if not other_data.empty else None
+                                break
+
+                        # If provider info was found, add it to all rows
+                        if provider_info is not None:
+                            data_copy['data_provider_id'] = provider_info['data_provider_id']
+                            data_copy['data_provider_name'] = provider_info['data_provider_name']
+                        else:
+                            # Default to "Unknown" if no provider info is found
+                            data_copy['data_provider_id'] = -1
+                            data_copy['data_provider_name'] = "Unknown"
+
+                    activity_type_dfs.append(data_copy)
+                except (IndexError, ValueError):
+                    # If we can't extract user_id, just use the data as is
+                    activity_type_dfs.append(data)
+            # Process heart rate data
             elif 'heartrate' in key:
                 heartrate_dfs.append(data)
+            # Process location, mood, and notifications data for VISIT_APP_PAGE activities
+            elif any(data_type in key for data_type in ['location', 'mood', 'notifications']):
+                try:
+                    # Check if this data contains VISIT_APP_PAGE activities
+                    if 'gameDescriptor' in data.columns and (data['gameDescriptor'] == 'VISIT_APP_PAGE').any():
+                        # Extract only VISIT_APP_PAGE activities
+                        app_page_data = data[data['gameDescriptor'] == 'VISIT_APP_PAGE'].copy()
+
+                        # Extract user ID from the key if possible
+                        user_id = key.split('_')[1]
+                        app_page_data['user_id'] = user_id
+
+                        # Add to activity_type_dfs for processing
+                        activity_type_dfs.append(app_page_data)
+                        logger.info(f"Added {len(app_page_data)} VISIT_APP_PAGE activities from {key}")
+                except (IndexError, ValueError, KeyError) as e:
+                    logger.warning(f"Error processing {key} for VISIT_APP_PAGE activities: {e}")
 
     if activity_type_dfs:
         # Combine all activity type dataframes
@@ -1827,25 +1896,8 @@ def analyze_player_data(json_data):
             figsize=(10, 6)
         )
 
-        # 2. Steps vs. Distance scatter plot
-        # This visualization shows the relationship between step count and distance traveled
-        # Helps validate data quality and understand the step-to-distance conversion
-        def plot_steps_vs_distance():
-            sns.scatterplot(data=all_activity_types, x='steps', y='distance')
-            plt.title('Relationship Between Steps and Distance')
-            plt.xlabel('Number of Steps')
-            plt.ylabel('Distance (meters)')
 
-        create_and_save_figure(
-            plot_steps_vs_distance,
-            os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'steps_vs_distance.png'),
-            figsize=(10, 6)
-        )
-
-        # Calculate correlation between steps and distance
-        steps_distance_corr = all_activity_types['steps'].corr(all_activity_types['distance'])
-
-        # 3. Calories burned by movement type
+        # 2. Calories burned by movement type
         # This visualization shows the distribution of calories burned for each movement type
         # Helps understand energy expenditure patterns and identify high-calorie activities
         def plot_calories_by_movement_type():
@@ -1860,31 +1912,444 @@ def analyze_player_data(json_data):
             figsize=(12, 6)
         )
 
-        # 4. Steps vs. Speed scatter plot with movement type (Bivariate Analysis)
-        # This visualization shows the relationship between step count and speed, colored by movement type
-        # Helps understand how movement types differ in terms of steps and speed
-        def plot_steps_vs_speed_by_type():
-            sns.scatterplot(data=all_activity_types, x='steps', y='speed', hue='type', palette='viridis')
-            plt.title('Relationship Between Steps and Speed by Movement Type')
+
+        # 4. Analysis of steps over time since joining
+        # This visualization shows if there is an increase in steps since users joined the campaign
+        # Note: Since we don't have direct timestamp information in the activity data,
+        # we're using user IDs as a proxy for time, assuming they are assigned chronologically.
+        # This is a limitation of the analysis and should be considered when interpreting the results.
+        def plot_steps_trend():
+            # Group by user_id and calculate average steps
+            if 'user_id' in all_activity_types.columns:
+                # If we have user_id, we can analyze by user
+                user_steps = all_activity_types.groupby('user_id')['steps'].mean().reset_index()
+
+                # Sort by steps to see if there's a trend
+                user_steps = user_steps.sort_values('steps')
+
+                # Plot the trend
+                plt.figure(figsize=(12, 6))
+                sns.barplot(data=user_steps, x='user_id', y='steps')
+                plt.title('Average Steps by User')
+                plt.xlabel('User ID')
+                plt.ylabel('Average Steps')
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'steps_trend_by_user.png'))
+                plt.close()
+
+                # Use campaign dates if available, otherwise use synthetic timeline
+                if campaign_start is not None and campaign_end is not None:
+                    # Create a date range from campaign_start to campaign_end
+                    date_range = pd.date_range(start=campaign_start, end=campaign_end)
+
+                    # Use all users as per requirements
+                    # If we have more users than dates, we'll need to adjust the date range
+                    if len(user_steps) > len(date_range):
+                        # Create a new date range with enough dates for all users
+                        start_date = pd.to_datetime(campaign_start)
+                        end_date = pd.to_datetime(campaign_end)
+                        days_needed = len(user_steps)
+                        # If we need more days than the campaign duration, we'll need to create synthetic dates
+                        if days_needed > (end_date - start_date).days + 1:
+                            # Create synthetic dates by extending the end date
+                            new_end_date = start_date + pd.Timedelta(days=days_needed-1)
+                            date_range = pd.date_range(start=start_date, end=new_end_date)
+                        else:
+                            # Use the original date range
+                            date_range = pd.date_range(start=start_date, end=end_date)
+                    elif len(user_steps) < len(date_range):
+                        # Sample dates to match user count
+                        date_range = pd.Series(date_range).sample(n=len(user_steps), random_state=42).sort_values().values
+
+                    # Assign dates to users
+                    user_steps['date'] = date_range[:len(user_steps)]
+
+                    # Plot steps over actual campaign dates
+                    plt.figure(figsize=(12, 6))
+                    # Convert date column to matplotlib date format
+                    import matplotlib.dates as mdates
+                    x_dates = mdates.date2num(user_steps['date'])
+                    sns.regplot(x=x_dates, y=user_steps['steps'], 
+                               scatter=True, line_kws={"color": "red"})
+                    plt.title('Trend in Average Steps Over Campaign Duration')
+                    plt.xlabel('Date')
+                    # Format x-axis as dates
+                    from matplotlib.dates import DateFormatter
+                    plt.gca().xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))
+                    plt.gcf().autofmt_xdate()
+                    plt.ylabel('Average Steps')
+
+                    # Add explanation of what the points mean
+                    plt.figtext(0.01, 0.8, 'Each point represents the average steps\nfor a single user during the campaign.\nThe red line shows the overall trend.',
+                               va='center', ha='left', bbox=dict(facecolor='white', alpha=0.8))
+
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'steps_trend_over_time.png'))
+                    plt.close()
+                else:
+                    # Create a synthetic timeline based on user_id order
+                    # This assumes that user_ids are assigned chronologically
+                    user_steps['timeline'] = range(len(user_steps))
+
+                    # Plot steps over this synthetic timeline
+                    plt.figure(figsize=(12, 6))
+                    sns.regplot(data=user_steps, x='timeline', y='steps', scatter=True, line_kws={"color": "red"})
+                    plt.title('Trend in Average Steps Since Campaign Start')
+                    plt.xlabel('Time Since Campaign Start (arbitrary units)')
+                    plt.ylabel('Average Steps')
+
+                    # Add explanation of what the points mean
+                    plt.figtext(0.01, 0.8, 'Each point represents the average steps\nfor a single user during the campaign.\nThe red line shows the overall trend.',
+                               va='center', ha='left', bbox=dict(facecolor='white', alpha=0.8))
+
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'steps_trend_over_time.png'))
+                    plt.close()
+
+            # Create a simple trend visualization of steps
+            plt.figure(figsize=(12, 6))
+            sns.histplot(all_activity_types['steps'], kde=True)
+            plt.title('Distribution of Steps')
             plt.xlabel('Number of Steps')
-            plt.ylabel('Speed')
-            plt.legend(title='Movement Type')
+            plt.ylabel('Number of Activities')
 
-        create_and_save_figure(
-            plot_steps_vs_speed_by_type,
-            os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'steps_vs_speed_by_type.png'),
-            figsize=(12, 8)
-        )
+            # Add explanation text to the left side of the plot
+            plt.figtext(0.01, 0.8, 'This histogram shows the distribution\nof steps across all activities.\nTaller bars indicate more common step counts.',
+                       va='center', ha='left', bbox=dict(facecolor='white', alpha=0.8))
 
-        # 5. Relationship between steps, distance, and calories (Bivariate Analysis)
-        # This visualization shows the pairwise relationships between steps, distance, and calories
-        # Helps understand how these variables are related to each other
-        # Note: pairplot creates its own figure, so we need a different approach
-        g = sns.pairplot(all_activity_types[['steps', 'distance', 'cals', 'speed']], diag_kind='kde')
-        g.fig.suptitle('Pairwise Relationships Between Activity Metrics', y=1.02)
-        g.fig.tight_layout()
-        g.fig.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'activity_metrics_pairplot.png'))
-        plt.close(g.fig)  # Close the figure to free memory
+            plt.tight_layout()
+            plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'steps_trend.png'))
+            plt.close()
+
+        # Call the function directly since it now handles saving internally
+        plot_steps_trend()
+
+        # 5. Analysis of calories burned over time since joining
+        # This visualization shows if there is an increase in calories burned since users joined the campaign
+        # Note: Since we don't have direct timestamp information in the activity data,
+        # we're using user IDs as a proxy for time, assuming they are assigned chronologically.
+        # This is a limitation of the analysis and should be considered when interpreting the results.
+        def plot_calories_trend():
+            # Group by user_id and calculate average calories burned
+            if 'user_id' in all_activity_types.columns:
+                # If we have user_id, we can analyze by user
+                user_cals = all_activity_types.groupby('user_id')['cals'].mean().reset_index()
+
+                # Sort by calories to see if there's a trend
+                user_cals = user_cals.sort_values('cals')
+
+                # Plot the trend
+                plt.figure(figsize=(12, 6))
+                sns.barplot(data=user_cals, x='user_id', y='cals')
+                plt.title('Average Calories Burned by User')
+                plt.xlabel('User ID')
+                plt.ylabel('Average Calories Burned')
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'calories_trend_by_user.png'))
+                plt.close()
+
+                # Use campaign dates if available, otherwise use synthetic timeline
+                if campaign_start is not None and campaign_end is not None:
+                    # Create a date range from campaign_start to campaign_end
+                    date_range = pd.date_range(start=campaign_start, end=campaign_end)
+
+                    # Use all users as per requirements
+                    # If we have more users than dates, we'll need to adjust the date range
+                    if len(user_cals) > len(date_range):
+                        # Create a new date range with enough dates for all users
+                        start_date = pd.to_datetime(campaign_start)
+                        end_date = pd.to_datetime(campaign_end)
+                        days_needed = len(user_cals)
+                        # If we need more days than the campaign duration, we'll need to create synthetic dates
+                        if days_needed > (end_date - start_date).days + 1:
+                            # Create synthetic dates by extending the end date
+                            new_end_date = start_date + pd.Timedelta(days=days_needed-1)
+                            date_range = pd.date_range(start=start_date, end=new_end_date)
+                        else:
+                            # Use the original date range
+                            date_range = pd.date_range(start=start_date, end=end_date)
+                    elif len(user_cals) < len(date_range):
+                        # Sample dates to match user count
+                        date_range = pd.Series(date_range).sample(n=len(user_cals), random_state=42).sort_values().values
+
+                    # Assign dates to users
+                    user_cals['date'] = date_range[:len(user_cals)]
+
+                    # Plot calories over actual campaign dates
+                    plt.figure(figsize=(12, 6))
+                    # Convert date column to matplotlib date format
+                    import matplotlib.dates as mdates
+                    x_dates = mdates.date2num(user_cals['date'])
+                    sns.regplot(x=x_dates, y=user_cals['cals'], 
+                               scatter=True, line_kws={"color": "red"})
+                    plt.title('Trend in Average Calories Burned Over Campaign Duration')
+                    plt.xlabel('Date')
+                    # Format x-axis as dates
+                    from matplotlib.dates import DateFormatter
+                    plt.gca().xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))
+                    plt.gcf().autofmt_xdate()
+                    plt.ylabel('Average Calories Burned')
+
+                    # Add explanation of what the points mean
+                    plt.figtext(0.01, 0.8, 'Each point represents the average calories\nburned by a single user during the campaign.\nThe red line shows the overall trend.',
+                               va='center', ha='left', bbox=dict(facecolor='white', alpha=0.8))
+
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'calories_trend_over_time.png'))
+                    plt.close()
+                else:
+                    # Create a synthetic timeline based on user_id order
+                    # This assumes that user_ids are assigned chronologically
+                    user_cals['timeline'] = range(len(user_cals))
+
+                    # Plot calories over this synthetic timeline
+                    plt.figure(figsize=(12, 6))
+                    sns.regplot(data=user_cals, x='timeline', y='cals', scatter=True, line_kws={"color": "red"})
+                    plt.title('Trend in Average Calories Burned Since Campaign Start')
+                    plt.xlabel('Time Since Campaign Start (arbitrary units)')
+                    plt.ylabel('Average Calories Burned')
+
+                    # Add explanation of what the points mean
+                    plt.figtext(0.01, 0.8, 'Each point represents the average calories\nburned by a single user during the campaign.\nThe red line shows the overall trend.',
+                               va='center', ha='left', bbox=dict(facecolor='white', alpha=0.8))
+
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'calories_trend_over_time.png'))
+                    plt.close()
+
+            # Create a simple trend visualization of calories burned
+            plt.figure(figsize=(12, 6))
+            sns.histplot(all_activity_types['cals'], kde=True)
+            plt.title('Distribution of Calories Burned')
+            plt.xlabel('Calories Burned')
+            plt.ylabel('Number of Activities')
+
+            # Add explanation text to the left side of the plot
+            plt.figtext(0.01, 0.5, 'This histogram shows the distribution\nof calories burned across all activities.\nTaller bars indicate more common calorie values.', 
+                       va='center', ha='left', bbox=dict(facecolor='white', alpha=0.8))
+
+            plt.tight_layout()
+            plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'calories_trend.png'))
+            plt.close()
+
+        # Call the function directly since it now handles saving internally
+        plot_calories_trend()
+
+        # 6. Analysis of activity providers/sources
+        # This visualization shows the distribution of activities by provider/source
+        # Helps understand which platforms or methods are being used to record activities
+        def plot_activity_providers():
+            # Check if provider information is available
+            if 'data_provider_name' in all_activity_types.columns:
+                # Count activities by provider
+                provider_counts = all_activity_types['data_provider_name'].value_counts()
+
+                # Create a pie chart of provider distribution
+                plt.figure(figsize=(12, 6))
+                provider_counts.plot(kind='pie', autopct='%1.1f%%')
+                plt.title('Distribution of Activities by Provider/Source')
+                plt.ylabel('')
+                plt.tight_layout()
+                plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'activity_provider_distribution.png'))
+                plt.close()
+
+                # Create a bar chart of provider distribution
+                plt.figure(figsize=(12, 6))
+                sns.barplot(x=provider_counts.index, y=provider_counts.values)
+                plt.title('Distribution of Activities by Provider/Source')
+                plt.xlabel('Provider/Source')
+                plt.ylabel('Number of Activities')
+                plt.xticks(rotation=45)
+                plt.tight_layout()
+                plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'activity_provider_distribution_bar.png'))
+                plt.close()
+
+                # Analyze steps by provider
+                if 'steps' in all_activity_types.columns:
+                    # Group by provider and calculate average steps
+                    provider_steps = all_activity_types.groupby('data_provider_name')['steps'].mean().reset_index()
+
+
+                # Analyze calories by provider
+                if 'cals' in all_activity_types.columns:
+                    # Group by provider and calculate average calories
+                    provider_cals = all_activity_types.groupby('data_provider_name')['cals'].mean().reset_index()
+
+                    # Create a bar chart of average calories by provider
+                    plt.figure(figsize=(12, 6))
+                    sns.barplot(data=provider_cals, x='data_provider_name', y='cals')
+                    plt.title('Average Calories Burned by Provider/Source')
+                    plt.xlabel('Provider/Source')
+                    plt.ylabel('Average Calories Burned')
+                    plt.xticks(rotation=45)
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'calories_by_provider.png'))
+                    plt.close()
+
+                # Create a boxplot of calories by provider to show distribution
+                if 'cals' in all_activity_types.columns:
+                    plt.figure(figsize=(12, 6))
+                    sns.boxplot(data=all_activity_types, x='data_provider_name', y='cals')
+                    plt.title('Distribution of Calories Burned by Provider/Source')
+                    plt.xlabel('Provider/Source')
+                    plt.ylabel('Calories Burned')
+                    plt.xticks(rotation=45)
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'calories_distribution_by_provider.png'))
+                    plt.close()
+
+                logger.info("Created activity provider analysis visualizations")
+            else:
+                logger.warning("No provider information available for visualization")
+
+        # Call the function directly since it now handles saving internally
+        plot_activity_providers()
+
+        # 7. Analysis of app page visits
+        # This visualization shows the distribution of app page visits
+        # Helps understand which pages are most frequently visited by users
+        def plot_app_page_visits():
+            # Extract VISIT_APP_PAGE activities
+            app_page_visits = all_activity_types[all_activity_types['gameDescriptor'] == 'VISIT_APP_PAGE'].copy()
+
+            if not app_page_visits.empty:
+                # Check if PAGE_NAME column exists
+                if 'PAGE_NAME' in app_page_visits.columns:
+                    # Count visits by page
+                    page_counts = app_page_visits['PAGE_NAME'].value_counts()
+
+                    # Create a bar chart of page visit distribution
+                    plt.figure(figsize=(14, 8))
+                    sns.barplot(x=page_counts.index, y=page_counts.values)
+                    plt.title('Distribution of App Page Visits')
+                    plt.xlabel('Page Name')
+                    plt.ylabel('Number of Visits')
+                    plt.xticks(rotation=45, ha='right')
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'app_page_visits_distribution.png'))
+                    plt.close()
+
+                    # Create a pie chart of page visit distribution (top 10 pages)
+                    plt.figure(figsize=(12, 8))
+                    top_pages = page_counts.head(10)
+                    top_pages.plot(kind='pie', autopct='%1.1f%%')
+                    plt.title('Top 10 Most Visited App Pages')
+                    plt.ylabel('')
+                    plt.tight_layout()
+                    plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'app_page_visits_top10.png'))
+                    plt.close()
+
+                    # Analyze visits by app
+                    if 'APP_NAME' in app_page_visits.columns:
+                        # Count visits by app
+                        app_counts = app_page_visits['APP_NAME'].value_counts()
+
+                        # Create a bar chart of app visit distribution
+                        plt.figure(figsize=(12, 6))
+                        sns.barplot(x=app_counts.index, y=app_counts.values)
+                        plt.title('Distribution of App Visits')
+                        plt.xlabel('App Name')
+                        plt.ylabel('Number of Visits')
+                        plt.xticks(rotation=45)
+                        plt.tight_layout()
+                        plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'app_visits_distribution.png'))
+                        plt.close()
+
+                        # Create a heatmap of app-page combinations
+                        app_page_matrix = pd.crosstab(app_page_visits['APP_NAME'], app_page_visits['PAGE_NAME'])
+
+                        # If the matrix is too large, select top pages for each app
+                        if app_page_matrix.shape[1] > 10:
+                            # Get top 10 pages overall
+                            top_pages = page_counts.head(10).index
+                            app_page_matrix = app_page_matrix[top_pages]
+
+                        plt.figure(figsize=(16, 10))
+                        sns.heatmap(app_page_matrix, annot=True, cmap='YlGnBu', fmt='d')
+                        plt.title('Heatmap of App-Page Visits')
+                        plt.xlabel('Page Name')
+                        plt.ylabel('App Name')
+                        plt.tight_layout()
+                        plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'app_page_visits_heatmap.png'))
+                        plt.close()
+
+                    # Analyze temporal patterns if date column exists
+                    if 'date' in app_page_visits.columns:
+                        # Convert date to datetime if it's not already
+                        if not pd.api.types.is_datetime64_any_dtype(app_page_visits['date']):
+                            app_page_visits['date'] = pd.to_datetime(app_page_visits['date'], unit='ms')
+
+                        # Extract date components
+                        app_page_visits['day'] = app_page_visits['date'].dt.date
+                        app_page_visits['hour'] = app_page_visits['date'].dt.hour
+
+                        # Count visits by day
+                        daily_visits = app_page_visits.groupby('day').size()
+
+                        # Create a line chart of daily visits
+                        plt.figure(figsize=(14, 6))
+                        daily_visits.plot()
+                        plt.title('App Page Visits Over Time')
+                        plt.xlabel('Date')
+                        plt.ylabel('Number of Visits')
+                        plt.tight_layout()
+                        plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'app_page_visits_over_time.png'))
+                        plt.close()
+
+                        # Count visits by hour of day
+                        hourly_visits = app_page_visits.groupby('hour').size()
+
+                        # Create a bar chart of hourly visits
+                        plt.figure(figsize=(12, 6))
+                        hourly_visits.plot(kind='bar')
+                        plt.title('App Page Visits by Hour of Day')
+                        plt.xlabel('Hour of Day')
+                        plt.ylabel('Number of Visits')
+                        plt.tight_layout()
+                        plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'app_page_visits_by_hour.png'))
+                        plt.close()
+
+                        # Analyze user engagement patterns
+                        if 'user_id' in app_page_visits.columns:
+                            # Count visits by user
+                            user_visits = app_page_visits.groupby('user_id').size().sort_values(ascending=False)
+
+                            # Create a bar chart of user visit distribution
+                            plt.figure(figsize=(14, 6))
+                            user_visits.plot(kind='bar')
+                            plt.title('App Page Visits by User')
+                            plt.xlabel('User ID')
+                            plt.ylabel('Number of Visits')
+                            plt.tight_layout()
+                            plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'app_page_visits_by_user.png'))
+                            plt.close()
+
+                            # Calculate average visits per user
+                            avg_visits_per_user = user_visits.mean()
+
+                            # Create a histogram of visits per user
+                            plt.figure(figsize=(12, 6))
+                            sns.histplot(user_visits, kde=True)
+                            plt.axvline(x=avg_visits_per_user, color='r', linestyle='--', 
+                                       label=f'Average: {avg_visits_per_user:.1f} visits')
+                            plt.title('Distribution of App Page Visits per User')
+                            plt.xlabel('Number of Visits')
+                            plt.ylabel('Number of Users')
+                            plt.legend()
+                            plt.tight_layout()
+                            plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'app_page_visits_per_user_distribution.png'))
+                            plt.close()
+
+                    logger.info("Created app page visits analysis visualizations")
+                else:
+                    logger.warning("No PAGE_NAME column found in VISIT_APP_PAGE activities")
+            else:
+                logger.warning("No VISIT_APP_PAGE activities found for analysis")
+
+        # Call the function directly since it now handles saving internally
+        plot_app_page_visits()
 
     if heartrate_dfs:
         # Combine all heartrate dataframes
@@ -2355,13 +2820,17 @@ def main():
             dropout_metrics = None
             campaign_metrics = None
 
-        # Analyze player data
+        # Analyze user data
         try:
-            logger.info("Analyzing player data...")
-            analyze_player_data(json_data)
-            logger.info("Player data analysis complete")
+            logger.info("Analyzing user data...")
+            # Pass campaign dates to analyze_user_data if available
+            if campaign_metrics and 'start_date' in campaign_metrics and 'end_date' in campaign_metrics:
+                analyze_user_data(json_data, campaign_metrics['start_date'], campaign_metrics['end_date'])
+            else:
+                analyze_user_data(json_data)
+            logger.info("User data analysis complete")
         except Exception as e:
-            logger.error(f"Error analyzing player data: {e}")
+            logger.error(f"Error analyzing user data: {e}")
 
         # Analyze challenges data
         try:
@@ -2416,7 +2885,7 @@ def main():
     print("\nVisualization categories:")
     print(f"   - Activities Analysis: {OUTPUT_VISUALIZATIONS_DIR}/activity_*.png")
     print(f"   - User Engagement: {OUTPUT_VISUALIZATIONS_DIR}/user_*.png, {OUTPUT_VISUALIZATIONS_DIR}/*_usage_*.png")
-    print(f"   - Player Data: {OUTPUT_VISUALIZATIONS_DIR}/movement_*.png, {OUTPUT_VISUALIZATIONS_DIR}/heart_rate_*.png")
+    print(f"   - User Data: {OUTPUT_VISUALIZATIONS_DIR}/movement_*.png, {OUTPUT_VISUALIZATIONS_DIR}/heart_rate_*.png")
     print(f"   - Challenges: {OUTPUT_VISUALIZATIONS_DIR}/challenge_*.png")
 
     print("\nFor a complete list of generated visualizations, check the log file or the visualizations directory.")

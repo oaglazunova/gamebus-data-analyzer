@@ -7,7 +7,7 @@ import random
 from typing import Dict, List, Optional, Any
 import time
 
-from config.credentials import BASE_URL, TOKEN_URL, PLAYER_ID_URL, ACTIVITIES_URL
+from config.credentials import BASE_URL, TOKEN_URL, USER_ID_URL, ACTIVITIES_URL
 from config.settings import MAX_RETRIES, REQUEST_TIMEOUT, VALID_GAME_DESCRIPTORS
 
 # Set up logging
@@ -28,17 +28,17 @@ class GameBusClient:
         self.authcode = authcode
         self.base_url = BASE_URL
         self.token_url = TOKEN_URL
-        self.player_id_url = PLAYER_ID_URL
+        self.user_id_url = USER_ID_URL
         self.activities_url = ACTIVITIES_URL
         self._cache = {}  # Cache for API responses
 
-    def get_player_token(self, username: str, password: str) -> Optional[str]:
+    def get_user_token(self, username: str, password: str) -> Optional[str]:
         """
-        Get an access token for the player.
+        Get an access token for the user.
 
         Args:
-            username: Player's username/email
-            password: Player's password
+            username: User's username/email
+            password: User's password
 
         Returns:
             Access token or None if authentication failed
@@ -60,7 +60,7 @@ class GameBusClient:
             logger.info("Token fetched successfully")
             return token
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to get player token: {e}")
+            logger.error(f"Failed to get user token: {e}")
             return None
 
     def _fetch_paginated_data(self, data_url: str, token: str, page_size: int = 50) -> List[Dict[str, Any]]:
@@ -177,55 +177,55 @@ class GameBusClient:
         logger.info(f"Total data points fetched: {len(all_data)}")
         return all_data
 
-    def get_player_id(self, token: str) -> Optional[int]:
+    def get_user_id(self, token: str) -> Optional[int]:
         """
-        Get the player ID using the access token.
+        Get the user ID using the access token.
 
         Args:
             token: Access token
 
         Returns:
-            Player ID or None if retrieval failed
+            User ID or None if retrieval failed
         """
         headers = {
             "Authorization": f"Bearer {token}"
         }
 
         try:
-            response = requests.get(self.player_id_url, headers=headers, timeout=REQUEST_TIMEOUT)
+            response = requests.get(self.user_id_url, headers=headers, timeout=REQUEST_TIMEOUT)
             response.raise_for_status()
-            player_data = response.json()
-            player_id = player_data.get("player", {}).get("id")
-            logger.info("Player ID fetched successfully")
-            return player_id
+            user_data = response.json()
+            user_id = user_data.get("player", {}).get("id")
+            logger.info("User ID fetched successfully")
+            return user_id
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to get player ID: {e}")
+            logger.error(f"Failed to get user ID: {e}")
             return None
 
-    def get_player_data(self, token: str, player_id: int, game_descriptor: str, 
+    def get_user_data(self, token: str, user_id: int, game_descriptor: str, 
                        page_size: int = 50, try_all_descriptors: bool = False) -> List[Dict[str, Any]]:
         """
-        Get player data for a specific game descriptor.
+        Get user data for a specific game descriptor.
 
         Args:
             token: Access token
-            player_id: Player ID
+            user_id: User ID
             game_descriptor: Type of data to retrieve (e.g., "GEOFENCE", "LOG_MOOD")
             page_size: Number of items per page
             try_all_descriptors: If True, try all valid game descriptors if the specified one doesn't return data
 
         Returns:
-            List of player data points
+            List of user data points
         """
-        # Create a cache key based on player_id and game_descriptor
-        cache_key = f"{player_id}_{game_descriptor}"
+        # Create a cache key based on user_id and game_descriptor
+        cache_key = f"{user_id}_{game_descriptor}"
 
         # Check if data is already in cache
         if cache_key in self._cache:
-            logger.info(f"Using cached data for player {player_id} with game descriptor '{game_descriptor}'")
+            logger.info(f"Using cached data for user {user_id} with game descriptor '{game_descriptor}'")
             return self._cache[cache_key]
 
-        logger.info(f"Getting player data for player {player_id} with game descriptor '{game_descriptor}'")
+        logger.info(f"Getting user data for user {user_id} with game descriptor '{game_descriptor}'")
 
         if game_descriptor not in VALID_GAME_DESCRIPTORS:
             logger.warning(f"Game descriptor '{game_descriptor}' not in VALID_GAME_DESCRIPTORS. Attempting to use it anyway.")
@@ -236,14 +236,14 @@ class GameBusClient:
         urls_to_try = []
 
         # Standard URL format with gds parameter
-        urls_to_try.append((self.activities_url + "&gds={}").format(player_id, game_descriptor))
+        urls_to_try.append((self.activities_url + "&gds={}").format(user_id, game_descriptor))
 
         # Special case for SELFREPORT
         if game_descriptor == "SELFREPORT":
-            urls_to_try = [(self.activities_url + "&excludedGds=").format(player_id)] + urls_to_try
+            urls_to_try = [(self.activities_url + "&excludedGds=").format(user_id)] + urls_to_try
 
         # Try without any game descriptor filter
-        urls_to_try.append(self.activities_url.format(player_id))
+        urls_to_try.append(self.activities_url.format(user_id))
 
         # Use the first URL as the default
         data_url = urls_to_try[0]
@@ -255,7 +255,7 @@ class GameBusClient:
             for url in urls_to_try:
                 logger.info(f"Trying URL: {url}")
                 # Check if this URL is already in cache
-                url_cache_key = f"{player_id}_{url}"
+                url_cache_key = f"{user_id}_{url}"
                 if url_cache_key in self._cache:
                     logger.info(f"Using cached data for URL: {url}")
                     temp_data = self._cache[url_cache_key]
@@ -274,16 +274,16 @@ class GameBusClient:
             logger.warning(f"No data found with any URL format. Using default URL: {data_url}")
 
         # Use the _fetch_paginated_data method to get the data
-        all_player_data = self._fetch_paginated_data(data_url, token, page_size)
+        all_user_data = self._fetch_paginated_data(data_url, token, page_size)
 
-        logger.info(f"Total data points fetched: {len(all_player_data)}")
+        logger.info(f"Total data points fetched: {len(all_user_data)}")
 
         # Cache the result
-        self._cache[cache_key] = all_player_data
+        self._cache[cache_key] = all_user_data
 
         # If no data was found and try_all_descriptors is True, try all valid game descriptors
         # But limit the number of descriptors to try to avoid hanging
-        if not all_player_data and try_all_descriptors:
+        if not all_user_data and try_all_descriptors:
             logger.info(f"No data found for game descriptor '{game_descriptor}'. Trying a limited set of game descriptors.")
 
             # Only try a few common descriptors instead of all of them
@@ -294,7 +294,7 @@ class GameBusClient:
 
             for descriptor in descriptors_to_try:
                 # Check if this descriptor is already in cache
-                descriptor_cache_key = f"{player_id}_{descriptor}"
+                descriptor_cache_key = f"{user_id}_{descriptor}"
                 if descriptor_cache_key in self._cache:
                     logger.info(f"Using cached data for game descriptor: {descriptor}")
                     descriptor_data = self._cache[descriptor_cache_key]
@@ -307,7 +307,7 @@ class GameBusClient:
                 logger.info(f"Trying game descriptor: {descriptor}")
                 try:
                     # Recursive call with the new descriptor, but don't try all descriptors again
-                    descriptor_data = self.get_player_data(token, player_id, descriptor, page_size, try_all_descriptors=False)
+                    descriptor_data = self.get_user_data(token, user_id, descriptor, page_size, try_all_descriptors=False)
                     if descriptor_data:
                         logger.info(f"Found {len(descriptor_data)} data points with game descriptor '{descriptor}'")
                         # Cache the result for the original cache key
@@ -319,4 +319,4 @@ class GameBusClient:
 
             logger.warning("No data found with any of the common game descriptors")
 
-        return all_player_data
+        return all_user_data

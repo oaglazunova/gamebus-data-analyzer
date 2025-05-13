@@ -17,5 +17,5 @@ if not AUTHCODE:
 # BASE_URL = "https://api-new.gamebus.eu/v2"
 BASE_URL = 'https://api.healthyw8.gamebus.eu/v2'
 TOKEN_URL = f"{BASE_URL}/oauth/token"
-PLAYER_ID_URL = f"{BASE_URL}/users/current"
-ACTIVITIES_URL = f"{BASE_URL}/players/{{}}/activities?sort=-date" 
+USER_ID_URL = f"{BASE_URL}/users/current"
+ACTIVITIES_URL = f"{BASE_URL}/players/{{}}/activities?sort=-date"

@@ -1,11 +1,11 @@
 # GameBus Data Analyzer
 
-A framework for extracting and analyzing health behavior data from the GameBus platform.
+A script for extracting and analyzing health behavior data from the GameBus platform.
 
 ## Project Structure
 
 ```
-GameBus-HealthBehaviorMining/
+gamebus-data-analyzer/
 ├── config/                         # Configuration files
 │   ├── credentials.py              # GameBus API credentials
 │   ├── paths.py                    # Path configurations
@@ -51,7 +51,7 @@ GameBus-HealthBehaviorMining/
 
    The analysis process includes:
    - Loading data from Excel files in the `config` directory and JSON files in the `data_raw` directory
-   - Generating descriptive statistics for each variable
+   - Generating descriptive statistics 
    - Creating visualizations to provide insights
    - Performing bivariate analyses to explore relationships between variables
    - Saving visualizations to the `data_analysis/visualizations` directory

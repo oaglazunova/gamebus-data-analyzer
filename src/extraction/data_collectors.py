@@ -23,18 +23,18 @@ class DataCollector:
     # Class-level cache for raw data
     _raw_data_cache = {}
 
-    def __init__(self, client: GameBusClient, token: str, player_id: int):
+    def __init__(self, client: GameBusClient, token: str, user_id: int):
         """
         Initialize the data collector.
 
         Args:
             client: GameBus client
             token: Access token
-            player_id: Player ID
+            user_id: User ID
         """
         self.client = client
         self.token = token
-        self.player_id = player_id
+        self.user_id = user_id
 
     def _save_raw_data(self, data: List[Dict[str, Any]], filename: str) -> str:
         """
@@ -116,13 +116,13 @@ class DataCollector:
                 game_descriptor_dict = get(data_point, "gameDescriptor", {})
                 game_descriptor = get(game_descriptor_dict, "translationKey", "UNKNOWN")
 
-                # Extract player information if available
-                player = get(data_point, "player", {})
-                if player:
-                    data["player_id"] = get(player, "id")
-                    first_name = get(player, 'firstName', '')
-                    last_name = get(player, 'lastName', '')
-                    data["player_name"] = f"{first_name} {last_name}".strip()
+                # Extract user information if available
+                user = get(data_point, "player", {})
+                if user:
+                    data["user_id"] = get(user, "id")
+                    first_name = get(user, 'firstName', '')
+                    last_name = get(user, 'lastName', '')
+                    data["user_name"] = f"{first_name} {last_name}".strip()
 
                 # Extract property instances
                 for property_instance in get(data_point, "propertyInstances", []):
@@ -326,17 +326,17 @@ class LocationDataCollector(DataCollector):
             Tuple of (parsed data, file path)
         """
         # Use class-level cache for raw data
-        cache_key = f"{self.player_id}_GEOFENCE"
+        cache_key = f"{self.user_id}_GEOFENCE"
         if cache_key in self._raw_data_cache:
-            logger.info(f"Using cached GEOFENCE data for player {self.player_id}")
+            logger.info(f"Using cached GEOFENCE data for user {self.user_id}")
             raw_data = self._raw_data_cache[cache_key]
         else:
-            logger.info(f"Fetching GEOFENCE data for player {self.player_id}")
-            raw_data = self.client.get_player_data(self.token, self.player_id, "GEOFENCE", try_all_descriptors=True)
+            logger.info(f"Fetching GEOFENCE data for user {self.user_id}")
+            raw_data = self.client.get_user_data(self.token, self.user_id, "GEOFENCE", try_all_descriptors=True)
             self._raw_data_cache[cache_key] = raw_data
 
         parsed_data = self._parse_general_data(raw_data)
-        file_path = self._save_raw_data(parsed_data, f"player_{self.player_id}_location.json")
+        file_path = self._save_raw_data(parsed_data, f"user_{self.user_id}_location.json")
         return parsed_data, file_path
 
 
@@ -353,17 +353,17 @@ class MoodDataCollector(DataCollector):
             Tuple of (parsed data, file path)
         """
         # Use class-level cache for raw data
-        cache_key = f"{self.player_id}_LOG_MOOD"
+        cache_key = f"{self.user_id}_LOG_MOOD"
         if cache_key in self._raw_data_cache:
-            logger.info(f"Using cached LOG_MOOD data for player {self.player_id}")
+            logger.info(f"Using cached LOG_MOOD data for user {self.user_id}")
             raw_data = self._raw_data_cache[cache_key]
         else:
-            logger.info(f"Fetching LOG_MOOD data for player {self.player_id}")
-            raw_data = self.client.get_player_data(self.token, self.player_id, "LOG_MOOD", try_all_descriptors=True)
+            logger.info(f"Fetching LOG_MOOD data for user {self.user_id}")
+            raw_data = self.client.get_user_data(self.token, self.user_id, "LOG_MOOD", try_all_descriptors=True)
             self._raw_data_cache[cache_key] = raw_data
 
         parsed_data = self._parse_general_data(raw_data)
-        file_path = self._save_raw_data(parsed_data, f"player_{self.player_id}_mood.json")
+        file_path = self._save_raw_data(parsed_data, f"user_{self.user_id}_mood.json")
         return parsed_data, file_path
 
 
@@ -380,17 +380,17 @@ class ActivityTypeDataCollector(DataCollector):
             Tuple of (parsed data, file path)
         """
         # Use class-level cache for raw data
-        cache_key = f"{self.player_id}_TIZEN(DETAIL)"
+        cache_key = f"{self.user_id}_TIZEN(DETAIL)"
         if cache_key in self._raw_data_cache:
-            logger.info(f"Using cached TIZEN data for player {self.player_id}")
+            logger.info(f"Using cached TIZEN data for user {self.user_id}")
             raw_data = self._raw_data_cache[cache_key]
         else:
-            logger.info(f"Fetching TIZEN data for player {self.player_id}")
-            raw_data = self.client.get_player_data(self.token, self.player_id, "TIZEN(DETAIL)", try_all_descriptors=True)
+            logger.info(f"Fetching TIZEN data for user {self.user_id}")
+            raw_data = self.client.get_user_data(self.token, self.user_id, "TIZEN(DETAIL)", try_all_descriptors=True)
             self._raw_data_cache[cache_key] = raw_data
 
         parsed_data = self._parse_tizen_data(raw_data, "ACTIVITY_TYPE")
-        file_path = self._save_raw_data(parsed_data, f"player_{self.player_id}_activity_type.json")
+        file_path = self._save_raw_data(parsed_data, f"user_{self.user_id}_activity_type.json")
         return parsed_data, file_path
 
 
@@ -407,17 +407,17 @@ class HeartRateDataCollector(DataCollector):
             Tuple of (parsed data, file path)
         """
         # Use class-level cache for raw data
-        cache_key = f"{self.player_id}_TIZEN(DETAIL)"
+        cache_key = f"{self.user_id}_TIZEN(DETAIL)"
         if cache_key in self._raw_data_cache:
-            logger.info(f"Using cached TIZEN data for player {self.player_id}")
+            logger.info(f"Using cached TIZEN data for user {self.user_id}")
             raw_data = self._raw_data_cache[cache_key]
         else:
-            logger.info(f"Fetching TIZEN data for player {self.player_id}")
-            raw_data = self.client.get_player_data(self.token, self.player_id, "TIZEN(DETAIL)", try_all_descriptors=True)
+            logger.info(f"Fetching TIZEN data for user {self.user_id}")
+            raw_data = self.client.get_user_data(self.token, self.user_id, "TIZEN(DETAIL)", try_all_descriptors=True)
             self._raw_data_cache[cache_key] = raw_data
 
         parsed_data = self._parse_tizen_data(raw_data, "HRM_LOG")
-        file_path = self._save_raw_data(parsed_data, f"player_{self.player_id}_heartrate.json")
+        file_path = self._save_raw_data(parsed_data, f"user_{self.user_id}_heartrate.json")
         return parsed_data, file_path
 
 
@@ -434,17 +434,17 @@ class AccelerometerDataCollector(DataCollector):
             Tuple of (parsed data, file path)
         """
         # Use class-level cache for raw data
-        cache_key = f"{self.player_id}_TIZEN(DETAIL)"
+        cache_key = f"{self.user_id}_TIZEN(DETAIL)"
         if cache_key in self._raw_data_cache:
-            logger.info(f"Using cached TIZEN data for player {self.player_id}")
+            logger.info(f"Using cached TIZEN data for user {self.user_id}")
             raw_data = self._raw_data_cache[cache_key]
         else:
-            logger.info(f"Fetching TIZEN data for player {self.player_id}")
-            raw_data = self.client.get_player_data(self.token, self.player_id, "TIZEN(DETAIL)", try_all_descriptors=True)
+            logger.info(f"Fetching TIZEN data for user {self.user_id}")
+            raw_data = self.client.get_user_data(self.token, self.user_id, "TIZEN(DETAIL)", try_all_descriptors=True)
             self._raw_data_cache[cache_key] = raw_data
 
         parsed_data = self._parse_tizen_data(raw_data, "ACCELEROMETER_LOG")
-        file_path = self._save_raw_data(parsed_data, f"player_{self.player_id}_accelerometer.json")
+        file_path = self._save_raw_data(parsed_data, f"user_{self.user_id}_accelerometer.json")
         return parsed_data, file_path
 
 
@@ -461,15 +461,15 @@ class NotificationDataCollector(DataCollector):
             Tuple of (parsed data, file path)
         """
         # Use class-level cache for raw data
-        cache_key = f"{self.player_id}_NOTIFICATION(DETAIL)"
+        cache_key = f"{self.user_id}_NOTIFICATION(DETAIL)"
         if cache_key in self._raw_data_cache:
-            logger.info(f"Using cached NOTIFICATION data for player {self.player_id}")
+            logger.info(f"Using cached NOTIFICATION data for user {self.user_id}")
             raw_data = self._raw_data_cache[cache_key]
         else:
-            logger.info(f"Fetching NOTIFICATION data for player {self.player_id}")
-            raw_data = self.client.get_player_data(self.token, self.player_id, "NOTIFICATION(DETAIL)", try_all_descriptors=True)
+            logger.info(f"Fetching NOTIFICATION data for user {self.user_id}")
+            raw_data = self.client.get_user_data(self.token, self.user_id, "NOTIFICATION(DETAIL)", try_all_descriptors=True)
             self._raw_data_cache[cache_key] = raw_data
 
         parsed_data = self._parse_general_data(raw_data)
-        file_path = self._save_raw_data(parsed_data, f"player_{self.player_id}_notifications.json")
+        file_path = self._save_raw_data(parsed_data, f"user_{self.user_id}_notifications.json")
         return parsed_data, file_path

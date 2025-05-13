@@ -87,31 +87,31 @@ def run_extraction(user_row: pd.Series, data_types: List[str]) -> Dict[str, List
     logger.info(f"Initializing GameBus client for user: {username}")
     client = GameBusClient(AUTHCODE)
 
-    # Get player token and ID
-    logger.info(f"Getting player token for user: {username}")
-    token = client.get_player_token(username, password)
+    # Get user token and ID
+    logger.info(f"Getting user token for user: {username}")
+    token = client.get_user_token(username, password)
     if not token:
         logger.error(f"Failed to get token for user {username}")
         return {}
 
-    logger.info(f"Getting player ID for user: {username}")
-    player_id = client.get_player_id(token)
-    if not player_id:
-        logger.error(f"Failed to get player ID for user {username}")
+    logger.info(f"Getting user ID for user: {username}")
+    user_id = client.get_user_id(token)
+    if not user_id:
+        logger.error(f"Failed to get user ID for user {username}")
         return {}
 
-    logger.info(f"Successfully authenticated user {username} with player ID {player_id}")
+    logger.info(f"Successfully authenticated user {username} with user ID {user_id}")
 
     # Collect data based on requested types
     results = {}
 
     collectors = {
-        'location': LocationDataCollector(client, token, player_id),
-        'mood': MoodDataCollector(client, token, player_id),
-        'activity': ActivityTypeDataCollector(client, token, player_id),
-        'heartrate': HeartRateDataCollector(client, token, player_id),
-        'accelerometer': AccelerometerDataCollector(client, token, player_id),
-        'notification': NotificationDataCollector(client, token, player_id)
+        'location': LocationDataCollector(client, token, user_id),
+        'mood': MoodDataCollector(client, token, user_id),
+        'activity': ActivityTypeDataCollector(client, token, user_id),
+        'heartrate': HeartRateDataCollector(client, token, user_id),
+        'accelerometer': AccelerometerDataCollector(client, token, user_id),
+        'notification': NotificationDataCollector(client, token, user_id)
     }
 
     types_to_collect = list(collectors.keys()) if 'all' in data_types else data_types

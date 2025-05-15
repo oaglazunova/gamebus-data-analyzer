@@ -4,7 +4,7 @@ GameBus API client for interacting with the GameBus platform.
 import requests
 import logging
 import random
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import time
 
 from config.credentials import BASE_URL, TOKEN_URL, USER_ID_URL, ACTIVITIES_URL
@@ -63,7 +63,7 @@ class GameBusClient:
             logger.error(f"Failed to get user token: {e}")
             return None
 
-    def _fetch_paginated_data(self, data_url: str, token: str, page_size: int = 50) -> List[Dict[str, Any]]:
+    def _fetch_paginated_data(self, data_url: str, token: str, page_size: int = 50) -> Tuple[List[Dict[str, Any]], List[str]]:
         """
         Fetch paginated data from the GameBus API.
 
@@ -73,18 +73,21 @@ class GameBusClient:
             page_size: Number of items per page
 
         Returns:
-            List of data points
+            Tuple containing:
+            - List of data points
+            - List of raw JSON responses
         """
         headers = {"Authorization": f"Bearer {token}"}
         logger.info(f"Fetching paginated data from URL: {data_url}")
 
         all_data = []
+        raw_responses = []  # Store raw JSON responses
         page = 0
         empty_pages_count = 0
-        max_empty_pages = 3  # Stop after 3 consecutive empty pages
-        max_pages = 10  # Maximum number of pages to fetch to prevent infinite loops
+        max_empty_pages = 10  # Stop after 10 consecutive empty pages (increased from 5)
+        max_pages = 50  # Maximum number of pages to fetch to prevent infinite loops (increased from 20)
         start_time = time.time()
-        max_time = 60  # Maximum time in seconds for the entire pagination process
+        max_time = 300  # Maximum time in seconds for the entire pagination process (increased from 120)
 
         while empty_pages_count < max_empty_pages and page < max_pages and (time.time() - start_time) < max_time:
             paginated_url = f"{data_url}&page={page}&size={page_size}"
@@ -105,8 +108,15 @@ class GameBusClient:
 
                     # Try to parse JSON response
                     try:
+                        # Store the raw response text
+                        raw_response_text = response.text
+
+                        # Parse the JSON
                         data = response.json()
                         success = True
+
+                        # Store the raw response
+                        raw_responses.append(raw_response_text)
                     except ValueError as json_err:
                         logger.error(f"Failed to parse JSON response: {json_err}")
                         logger.debug(f"Response content: {response.text[:500]}...")  # Log first 500 chars
@@ -159,7 +169,7 @@ class GameBusClient:
                         if hasattr(e, 'response') and e.response is not None:
                             logger.error(f"Response status code: {e.response.status_code}")
                             logger.error(f"Response content: {e.response.text[:500]}...")  # Log first 500 chars
-                        return all_data  # Return what we have so far
+                        return all_data, raw_responses  # Return what we have so far
 
             # If we couldn't get data after all retries, break the pagination loop
             if not success:
@@ -175,7 +185,7 @@ class GameBusClient:
             logger.info(f"Stopped pagination after reaching maximum time limit ({max_time} seconds)")
 
         logger.info(f"Total data points fetched: {len(all_data)}")
-        return all_data
+        return all_data, raw_responses
 
     def get_user_id(self, token: str) -> Optional[int]:
         """
@@ -203,7 +213,7 @@ class GameBusClient:
             return None
 
     def get_user_data(self, token: str, user_id: int, game_descriptor: str, 
-                       page_size: int = 50, try_all_descriptors: bool = False) -> List[Dict[str, Any]]:
+                       page_size: int = 50, try_all_descriptors: bool = False) -> tuple[List[Dict[str, Any]], str, List[str]]:
         """
         Get user data for a specific game descriptor.
 
@@ -215,7 +225,10 @@ class GameBusClient:
             try_all_descriptors: If True, try all valid game descriptors if the specified one doesn't return data
 
         Returns:
-            List of user data points
+            Tuple containing:
+            - List of user data points
+            - The actual game descriptor used to fetch the data
+            - List of raw JSON responses
         """
         # Create a cache key based on user_id and game_descriptor
         cache_key = f"{user_id}_{game_descriptor}"
@@ -223,7 +236,9 @@ class GameBusClient:
         # Check if data is already in cache
         if cache_key in self._cache:
             logger.info(f"Using cached data for user {user_id} with game descriptor '{game_descriptor}'")
-            return self._cache[cache_key]
+            # Cache now stores a tuple of (data, raw_responses)
+            data, raw_responses = self._cache[cache_key]
+            return data, game_descriptor, raw_responses
 
         logger.info(f"Getting user data for user {user_id} with game descriptor '{game_descriptor}'")
 
@@ -258,37 +273,39 @@ class GameBusClient:
                 url_cache_key = f"{user_id}_{url}"
                 if url_cache_key in self._cache:
                     logger.info(f"Using cached data for URL: {url}")
-                    temp_data = self._cache[url_cache_key]
+                    temp_data, temp_raw_responses = self._cache[url_cache_key]
                 else:
-                    temp_data = self._fetch_paginated_data(url, token, page_size)
+                    temp_data, temp_raw_responses = self._fetch_paginated_data(url, token, page_size)
                     # Cache the result
-                    self._cache[url_cache_key] = temp_data
+                    self._cache[url_cache_key] = (temp_data, temp_raw_responses)
 
                 if temp_data:
                     logger.info(f"Found data using URL: {url}")
                     # Cache the result for the original cache key
-                    self._cache[cache_key] = temp_data
-                    return temp_data
+                    self._cache[cache_key] = (temp_data, temp_raw_responses)
+                    return temp_data, game_descriptor, temp_raw_responses
 
             # If we didn't find any data, use the default URL and continue with the normal flow
             logger.warning(f"No data found with any URL format. Using default URL: {data_url}")
 
         # Use the _fetch_paginated_data method to get the data
-        all_user_data = self._fetch_paginated_data(data_url, token, page_size)
+        all_user_data, all_raw_responses = self._fetch_paginated_data(data_url, token, page_size)
 
         logger.info(f"Total data points fetched: {len(all_user_data)}")
 
         # Cache the result
-        self._cache[cache_key] = all_user_data
+        self._cache[cache_key] = (all_user_data, all_raw_responses)
+
+        # If data was found, return it with the original game descriptor
+        if all_user_data:
+            return all_user_data, game_descriptor, all_raw_responses
 
         # If no data was found and try_all_descriptors is True, try all valid game descriptors
-        # But limit the number of descriptors to try to avoid hanging
-        if not all_user_data and try_all_descriptors:
-            logger.info(f"No data found for game descriptor '{game_descriptor}'. Trying a limited set of game descriptors.")
+        if try_all_descriptors:
+            logger.info(f"No data found for game descriptor '{game_descriptor}'. Trying all valid game descriptors.")
 
-            # Only try a few common descriptors instead of all of them
-            common_descriptors = ["GEOFENCE", "LOG_MOOD", "TIZEN(DETAIL)", "NOTIFICATION(DETAIL)", "SELFREPORT"]
-            descriptors_to_try = [d for d in common_descriptors if d != game_descriptor]
+            # Try all valid game descriptors
+            descriptors_to_try = [d for d in VALID_GAME_DESCRIPTORS if d != game_descriptor]
 
             logger.info(f"Will try these descriptors: {descriptors_to_try}")
 
@@ -297,26 +314,26 @@ class GameBusClient:
                 descriptor_cache_key = f"{user_id}_{descriptor}"
                 if descriptor_cache_key in self._cache:
                     logger.info(f"Using cached data for game descriptor: {descriptor}")
-                    descriptor_data = self._cache[descriptor_cache_key]
+                    descriptor_data, descriptor_raw_responses = self._cache[descriptor_cache_key]
                     if descriptor_data:
                         logger.info(f"Found {len(descriptor_data)} data points with game descriptor '{descriptor}' (from cache)")
                         # Cache the result for the original cache key
-                        self._cache[cache_key] = descriptor_data
-                        return descriptor_data
+                        self._cache[cache_key] = (descriptor_data, descriptor_raw_responses)
+                        return descriptor_data, descriptor, descriptor_raw_responses
 
                 logger.info(f"Trying game descriptor: {descriptor}")
                 try:
                     # Recursive call with the new descriptor, but don't try all descriptors again
-                    descriptor_data = self.get_user_data(token, user_id, descriptor, page_size, try_all_descriptors=False)
+                    descriptor_data, actual_descriptor, descriptor_raw_responses = self.get_user_data(token, user_id, descriptor, page_size, try_all_descriptors=False)
                     if descriptor_data:
-                        logger.info(f"Found {len(descriptor_data)} data points with game descriptor '{descriptor}'")
+                        logger.info(f"Found {len(descriptor_data)} data points with game descriptor '{actual_descriptor}'")
                         # Cache the result for the original cache key
-                        self._cache[cache_key] = descriptor_data
-                        return descriptor_data
+                        self._cache[cache_key] = (descriptor_data, descriptor_raw_responses)
+                        return descriptor_data, actual_descriptor, descriptor_raw_responses
                 except Exception as e:
                     logger.warning(f"Error trying game descriptor '{descriptor}': {e}")
                     continue
 
-            logger.warning("No data found with any of the common game descriptors")
+            logger.warning("No data found with any of the valid game descriptors")
 
-        return all_user_data
+        return all_user_data, game_descriptor, all_raw_responses

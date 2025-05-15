@@ -84,10 +84,6 @@ RAW_DATA_DIR = os.path.join(PROJECT_ROOT, 'data_raw')
 ACTIVITY_RECORDING_TIME_MINUTES = 2  # Estimated time to record an activity
 MAX_SESSION_DURATION_MINUTES = 480  # 8 hours
 
-# Create output directories for visualizations and statistics
-os.makedirs(OUTPUT_VISUALIZATIONS_DIR, exist_ok=True)
-os.makedirs(OUTPUT_STATISTICS_DIR, exist_ok=True)
-
 def create_and_save_figure(
     plot_function: Callable[[], None],
     filename: str,
@@ -2774,6 +2770,11 @@ def main():
     """Main function to run the analysis"""
     try:
         logger.info("Starting data analysis")
+
+        # Create output directories for visualizations and statistics
+        os.makedirs(OUTPUT_VISUALIZATIONS_DIR, exist_ok=True)
+        os.makedirs(OUTPUT_STATISTICS_DIR, exist_ok=True)
+        logger.info(f"Created output directories: {OUTPUT_VISUALIZATIONS_DIR} and {OUTPUT_STATISTICS_DIR}")
 
         # Load data
         try:

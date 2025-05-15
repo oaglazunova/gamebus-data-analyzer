@@ -3,6 +3,8 @@
 data_raw/
 data_analysis
 *.xlsx
+old/
+api docs/
 
 
 # Ignore data files

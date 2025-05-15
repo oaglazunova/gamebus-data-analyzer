@@ -10,14 +10,7 @@ from typing import List, Dict, Any
 from config.credentials import AUTHCODE
 from config.paths import USERS_FILE_PATH
 from src.extraction.gamebus_client import GameBusClient
-from src.extraction.data_collectors import (
-    LocationDataCollector, 
-    MoodDataCollector,
-    ActivityTypeDataCollector,
-    HeartRateDataCollector,
-    AccelerometerDataCollector,
-    NotificationDataCollector
-)
+from src.extraction.data_collectors import AllDataCollector
 from src.utils.logging import setup_logging
 from src.analysis.data_analysis import main as run_analysis
 
@@ -27,9 +20,6 @@ def parse_args():
 
     parser.add_argument('--user-id', type=int, 
                         help='Specific user ID to process')
-    parser.add_argument('--data-types', nargs='+', default=['all'],
-                        choices=['all', 'location', 'mood', 'activity', 'heartrate', 'accelerometer', 'notification'],
-                        help='Data types to collect')
     parser.add_argument('--log-level', default='INFO',
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         help='Logging level')
@@ -66,7 +56,7 @@ def load_users(users_file: str) -> pd.DataFrame:
         logging.error(f"Failed to load users file: {e}")
         raise
 
-def run_extraction(user_row: pd.Series, data_types: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+def run_extraction(user_row: pd.Series) -> Dict[str, List[Dict[str, Any]]]:
     """
     Run the extraction step for a single user.
 
@@ -105,75 +95,67 @@ def run_extraction(user_row: pd.Series, data_types: List[str]) -> Dict[str, List
     # Collect data based on requested types
     results = {}
 
-    collectors = {
-        'location': LocationDataCollector(client, token, user_id),
-        'mood': MoodDataCollector(client, token, user_id),
-        'activity': ActivityTypeDataCollector(client, token, user_id),
-        'heartrate': HeartRateDataCollector(client, token, user_id),
-        'accelerometer': AccelerometerDataCollector(client, token, user_id),
-        'notification': NotificationDataCollector(client, token, user_id)
-    }
+    # Import threading and time for timeout handling
+    import threading
+    import time
 
-    types_to_collect = list(collectors.keys()) if 'all' in data_types else data_types
-    logger.info(f"Will collect these data types for user {username}: {types_to_collect}")
+    # Always use the AllDataCollector to extract all data types
+    logger.info(f"Using AllDataCollector to extract all data types for user {username}")
 
-    for data_type in types_to_collect:
-        if data_type in collectors:
-            logger.info(f"Starting collection of {data_type} data for user {username}")
-            try:
-                # Set a timeout for each collector to prevent hanging
-                import threading
-                import time
+    # Create the AllDataCollector
+    all_collector = AllDataCollector(client, token, user_id)
 
-                # Flag to indicate if collection is complete
-                collection_complete = False
-                collection_result = [None, None]  # [data, file_path]
-                collection_error = [None]  # Error message
+    # Flag to indicate if collection is complete
+    collection_complete = False
+    collection_result = [None, None]  # [data_dict, file_paths]
+    collection_error = [None]  # Error message
 
-                def collect_data():
-                    try:
-                        data, file_path = collectors[data_type].collect()
-                        collection_result[0] = data
-                        collection_result[1] = file_path
-                        nonlocal collection_complete
-                        collection_complete = True
-                    except Exception as e:
-                        collection_error[0] = str(e)
-                        collection_complete = True
+    def collect_all_data():
+        try:
+            data_dict, file_paths = all_collector.collect()
+            collection_result[0] = data_dict
+            collection_result[1] = file_paths
+            nonlocal collection_complete
+            collection_complete = True
+        except Exception as e:
+            collection_error[0] = str(e)
+            collection_complete = True
 
-                # Start collection in a separate thread
-                collection_thread = threading.Thread(target=collect_data)
-                collection_thread.daemon = True
-                collection_thread.start()
+    # Start collection in a separate thread
+    logger.info(f"Starting collection of ALL data types for user {username}")
+    collection_thread = threading.Thread(target=collect_all_data)
+    collection_thread.daemon = True
+    collection_thread.start()
 
-                # Wait for collection to complete or timeout
-                start_time = time.time()
-                timeout = 120  # 2 minutes timeout per collector
+    # Wait for collection to complete or timeout
+    start_time = time.time()
+    timeout = 300  # 5 minutes timeout for all data collection
 
-                while not collection_complete and (time.time() - start_time) < timeout:
-                    logger.info(f"Waiting for {data_type} data collection to complete for user {username}...")
-                    time.sleep(10)  # Check every 10 seconds
+    while not collection_complete and (time.time() - start_time) < timeout:
+        logger.info(f"Waiting for ALL data collection to complete for user {username}...")
+        time.sleep(20)  # Check every 20 seconds
 
-                if not collection_complete:
-                    logger.error(f"Timeout while collecting {data_type} data for user {username}")
-                    continue
+    if not collection_complete:
+        logger.error(f"Timeout while collecting ALL data for user {username}")
+        return results
 
-                if collection_error[0]:
-                    logger.error(f"Failed to collect {data_type} data for user {username}: {collection_error[0]}")
-                    continue
+    if collection_error[0]:
+        logger.error(f"Failed to collect ALL data for user {username}: {collection_error[0]}")
+        return results
 
-                data, file_path = collection_result
+    data_dict, file_paths = collection_result
 
-                if data:
-                    results[data_type] = data
-                    if file_path:
-                        logger.info(f"Collected {len(data)} {data_type} data points, saved to {file_path}")
-                    else:
-                        logger.warning(f"Collected {len(data)} {data_type} data points, but no file was created")
-                else:
-                    logger.warning(f"No {data_type} data collected for user {username}")
-            except Exception as e:
-                logger.error(f"Failed to collect {data_type} data for user {username}: {e}")
+    if data_dict:
+        # Add all collected data to results
+        results = data_dict
+        if file_paths:
+            logger.info(f"Collected data for {len(data_dict)} data types, saved to {len(file_paths)} files")
+            for file_path in file_paths:
+                logger.info(f"  - {file_path}")
+        else:
+            logger.warning(f"Collected data for {len(data_dict)} data types, but no files were created")
+    else:
+        logger.warning(f"No data collected for user {username}")
 
     logger.info(f"Completed extraction for user: {username}")
     return results
@@ -188,7 +170,7 @@ def main():
 
     # Check if we should run extraction
     # Skip extraction if only analysis is requested (--analyze flag is set and no other extraction-specific flags)
-    run_extraction_step = not args.analyze or args.user_id is not None or (args.data_types != ['all'])
+    run_extraction_step = not args.analyze or args.user_id is not None
 
     if run_extraction_step:
         # Load users
@@ -198,8 +180,21 @@ def main():
 
         # Process specific user or all users
         if args.user_id:
-            user_row = users_df[users_df['UserID'] == args.user_id].iloc[0]
-            results = run_extraction(user_row, args.data_types)
+            # Check if UserID column exists in the DataFrame
+            if 'UserID' in users_df.columns:
+                # Filter by UserID
+                matching_users = users_df[users_df['UserID'] == args.user_id]
+                if not matching_users.empty:
+                    user_row = matching_users.iloc[0]
+                    results = run_extraction(user_row)
+                else:
+                    logger.error(f"No user found with UserID {args.user_id}")
+                    return
+            else:
+                # If UserID column doesn't exist, we can't filter by it
+                logger.error("UserID column not found in users file. Cannot filter by user ID.")
+                logger.info("Available columns: " + ", ".join(users_df.columns))
+                return
         else:
             all_results = {}
 
@@ -210,7 +205,7 @@ def main():
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 # Submit all tasks
                 future_to_user = {
-                    executor.submit(run_extraction, user_row, args.data_types): user_row['email']
+                    executor.submit(run_extraction, user_row): user_row['email']
                     for _, user_row in users_df.iterrows()
                 }
 

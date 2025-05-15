@@ -8,6 +8,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # Data directories
 RAW_DATA_DIR = os.path.join(PROJECT_ROOT, "data_raw")
+CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
 
 
 # Define default paths

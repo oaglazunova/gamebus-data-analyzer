@@ -23,8 +23,6 @@ def parse_args():
     parser.add_argument('--log-level', default='INFO',
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         help='Logging level')
-    parser.add_argument('--users-file', type=str,
-                        help='Path to the XLSX file containing user credentials')
     parser.add_argument('--analyze', action='store_true',
                         help='Run data analysis after extraction')
 
@@ -174,9 +172,8 @@ def main():
 
     if run_extraction_step:
         # Load users
-        users_file = args.users_file if args.users_file else USERS_FILE_PATH
-        users_df = load_users(users_file)
-        logger.info(f"Loaded {len(users_df)} users from {users_file}")
+        users_df = load_users(USERS_FILE_PATH)
+        logger.info(f"Loaded {len(users_df)} users from {USERS_FILE_PATH}")
 
         # Process specific user or all users
         if args.user_id:

@@ -22,9 +22,8 @@ To set up your development environment:
 GAMEBUS_API_KEY=your_api_key_here
 ```
 
-2. For user data, you can either:
-   - Specify a custom path in `config/paths.py`
-   - Or specify a custom path using the `--users-file` parameter when running the pipeline
+2. For user data:
+   - The path to the users file is specified in `config/paths.py`
 
 3. The users XLSX file must be in the correct format:
    - It must include a header row with exact column names: `email` and `password` (both lowercase)

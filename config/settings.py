@@ -3,86 +3,59 @@ General settings for the GameBus-HealthBehaviorMining project.
 """
 
 # GameBus API configuration
-DEFAULT_PAGE_SIZE = 50
-MAX_RETRIES = 3
-REQUEST_TIMEOUT = 30  # seconds
+DEFAULT_PAGE_SIZE = 50  # Number of items per page in API requests
+MAX_RETRIES = 3  # Number of retry attempts for failed API requests
+REQUEST_TIMEOUT = 30  # Timeout in seconds for API requests
 
 # Data collection settings
+# List of valid game descriptors with their parameters as specified in the issue description
 VALID_GAME_DESCRIPTORS = [
-    "GEOFENCE",           # Location data
-    "LOG_MOOD",           # Mood logging data
-    "TIZEN(DETAIL)",      # Watch/wearable data
-    "NOTIFICATION(DETAIL)",  # Notification data
-    "SELFREPORT",         # Self-reported data
-    "STEPS",              # Step count data
-    "SLEEP",              # Sleep data
-    "WEIGHT",             # Weight data
-    "BLOOD_PRESSURE",     # Blood pressure data
-    "HEART_RATE",         # Heart rate data
-    "CALORIES",           # Calories data
-    "DISTANCE",           # Distance data
-    "FLOORS",             # Floors data
-    "ELEVATION",          # Elevation data
-    "ACTIVE_MINUTES",     # Active minutes data
-    "EXERCISE",           # Exercise data
-    "NUTRITION",          # Nutrition data
-    "WATER",              # Water intake data
-    "MEDITATION",         # Meditation data
-    "STRESS",             # Stress data
-    "OXYGEN_SATURATION",  # Oxygen saturation data
-    "BODY_TEMPERATURE",   # Body temperature data
-    "BODY_MASS_INDEX",    # Body mass index data
-    "BODY_FAT",           # Body fat data
-    "MUSCLE_MASS",        # Muscle mass data
-    "BONE_MASS",          # Bone mass data
-    "HYDRATION",          # Hydration data
-    "PULSE_WAVE_VELOCITY" # Pulse wave velocity data
-]
-
-# Property keys for different data types
-VALID_PROPERTY_KEYS = [
-    "UNKNOWN",
-    "ACTIVITY_TYPE",      # Activity type data
-    "HRM_LOG",            # Heart rate monitoring data
-    "ACCELEROMETER_LOG",  # Accelerometer data
-    "STEPS",              # Step count data
-    "DISTANCE",           # Distance data
-    "CALORIES",           # Calories data
-    "FLOORS",             # Floors data
-    "ELEVATION",          # Elevation data
-    "ACTIVE_MINUTES",     # Active minutes data
-    "SLEEP_DURATION",     # Sleep duration data
-    "SLEEP_QUALITY",      # Sleep quality data
-    "WEIGHT",             # Weight data
-    "BMI",                # Body mass index data
-    "BODY_FAT",           # Body fat data
-    "MUSCLE_MASS",        # Muscle mass data
-    "BONE_MASS",          # Bone mass data
-    "HYDRATION",          # Hydration data
-    "SYSTOLIC",           # Systolic blood pressure data
-    "DIASTOLIC",          # Diastolic blood pressure data
-    "HEART_RATE",         # Heart rate data
-    "RESTING_HEART_RATE", # Resting heart rate data
-    "MAX_HEART_RATE",     # Maximum heart rate data
-    "OXYGEN_SATURATION",  # Oxygen saturation data
-    "BODY_TEMPERATURE",   # Body temperature data
-    "MOOD",               # Mood data
-    "STRESS",             # Stress data
-    "NUTRITION",          # Nutrition data
-    "WATER",              # Water intake data
-    "MEDITATION",         # Meditation data
-    "LOCATION",           # Location data
-    "ACTIVITY_DURATION",  # Activity duration data
-    "ACTIVITY_INTENSITY", # Activity intensity data
-    "ACTIVITY_NAME",      # Activity name data
-    "ACTIVITY_DATE",      # Activity date data
-    "ACTIVITY_TIME",      # Activity time data
-    "ACTIVITY_CALORIES",  # Activity calories data
-    "ACTIVITY_DISTANCE",  # Activity distance data
-    "ACTIVITY_STEPS",     # Activity steps data
-    "ACTIVITY_FLOORS",    # Activity floors data
-    "ACTIVITY_ELEVATION", # Activity elevation data
-    "ACTIVITY_HEART_RATE" # Activity heart rate data
+    "GENERAL_ACTIVITY",    # ACTIVITY_TYPE, SECRET, DESCRIPTION, DURATION, STEPS, STEPS_SUM, VIDEO, EMOTION_AFTER_ACTIVITY
+    "WALK",                # DESCRIPTION, DISTANCE, DURATION, KCALORIES, SECRET, SPEED.AVG, SPEED.MAX, STEPS, VIDEO, EMOTION_AFTER_ACTIVITY
+    "RUN",                 # DESCRIPTION, DISTANCE, DURATION, KCALORIES, SECRET, SPEED.AVG, SPEED.MAX, STEPS, VIDEO, EMOTION_AFTER_ACTIVITY
+    "BIKE",                # DESCRIPTION, DISTANCE, DURATION, KCALORIES, SECRET, SPEED.AVG, VIDEO, EMOTION_AFTER_ACTIVITY
+    "TRANSPORT",           # ALTITUDE.AVG, ALTITUDE.MAX, ALTITUDE.MIN, DESCRIPTION, DISTANCE, DURATION, JSONARRAY.GEO, SECRET, SPEED.AVG, SPEED.MAX, VIDEO
+    "LOCATION",            # SECRET, DESCRIPTION, DURATION, COORDINATES, JSON.GEO, VIDEO, LIKERT_SCALE_SIX
+    "SOCIAL_SELFIE",       # SECRET, DESCRIPTION, DURATION, GROUP_SIZE, COORDINATES, JSON.GEO, VIDEO
+    "PHYSICAL_ACTIVITY",   # SECRET, DESCRIPTION, DURATION, PA_INTENSITY, SPORTS, VIDEO
+    "SCORE_GAMEBUS_POINTS", # ACTIVITY, FOR_CHALLENGE, CHALLENGE_RULE, NUMBER_OF_POINTS
+    "DAY_AGGREGATE",       # CONFIGURATION_NAME, START_DATE, END_DATE, STEPS_SUM, STEPS_AVG, STEPS_MAX, DISTANCE_SUM, DISTANCE_AVG, DISTANCE_MAX, DEVICE_TYPE, PA_DISTANCE_SUM, PA_CAL_SUM
+    "DAY_AGGREGATE_WALK",  # SECRET, DESCRIPTION, CONFIGURATION_NAME, START_DATE, END_DATE, STEPS_SUM, STEPS_AVG, STEPS_MAX, DISTANCE_SUM, DISTANCE_AVG, DISTANCE_MAX, VIDEO
+    "DAY_AGGREGATE_RUN",   # SECRET, DESCRIPTION, CONFIGURATION_NAME, START_DATE, END_DATE, STEPS_SUM, STEPS_AVG, STEPS_MAX, DISTANCE_SUM, DISTANCE_AVG, DISTANCE_MAX, VIDEO
+    "NUTRITION_DIARY",     # SECRET, DESCRIPTION, MEAL_TYPE, FIBERS_WEIGHT, KCAL_CARB, KCAL_FATS, KCAL_PROTEINS, PERC_CARB, PERC_FATS, PERC_FIBERS, PERC_PROTEINS, VIDEO
+    "DRINKING_DIARY",      # SECRET, DESCRIPTION, RANGE_GLASS_ALC, RANGE_GLASS_SUGAR, VIDEO
+    "CONSENT",             # DESCRIPTION, FOR_CAMPAIGN
+    "PLAY_LOTTERY",        # LOTTERY, FOR_CHALLENGE, WIN, REWARD
+    "NAVIGATE_APP",        # APP, FOR_CAMPAIGN, SESSION, UID, URI
+    "H5P_GENERAL",         # SECRET, DESCRIPTION, DURATION, ACTIVITY_TYPE, MIN_SCORE, MAX_SCORE, SCORE, SCORE_RATIO
+    "GENERAL_SURVEY",      # SECRET, DESCRIPTION, GENERAL_SURVEY_ANSWER
+    "BODY_MASS_INDEX",     # SECRET, DURATION, AGE, BODY_MASS_INDEX, GENDER, LENGTH, WAIST_CIRCUMFERENCE, WEIGHT
+    "MIPIP",               # SECRET, DURATION, MIPIP_AGREE_Q01, MIPIP_AGREE_Q02, MIPIP_AGREE_Q03, MIPIP_AGREE_Q04, MIPIP_AGREEABLENESS, MIPIP_CONSC_Q01, MIPIP_CONSC_Q02, MIPIP_CONSC_Q03, MIPIP_CONSC_Q04, MIPIP_CONSCIENTIOUSNESS, MIPIP_EXTRA_Q01, MIPIP_EXTRA_Q02, MIPIP_EXTRA_Q03, MIPIP_EXTRA_Q04, MIPIP_EXTRAVERSION, MIPIP_INTEL_Q01, MIPIP_INTEL_Q02, MIPIP_INTEL_Q03, MIPIP_INTEL_Q04, MIPIP_INTELLECT, MIPIP_NEURO_Q01, MIPIP_NEURO_Q02, MIPIP_NEURO_Q03, MIPIP_NEURO_Q04, MIPIP_NEUROTICISM
+    "WALK_PERFORMANCE",    # SECRET, DURATION, WALK_PERFORMANCE_BASELINE, WALK_PERFORMANCE_GOAL, WALK_PERFORMANCE_GROW
+    "BIKE_PERFORMANCE",    # SECRET, DURATION, BIKE_PERFORMANCE_BASELINE, BIKE_PERFORMANCE_GOAL, BIKE_PERFORMANCE_GROW
+    "SPORTS_PERFORMANCE",  # SECRET, DURATION, SPORTS_PERFORMANCE_BASELINE, SPORTS_PERFORMANCE_GOAL, SPORTS_PERFORMANCE_GROW
+    "LOG_MOOD",            # AROUSAL_STATE_VALUE, EVENT_AREA, EVENT_TIMESTAMP, INTOXICATION_LEVEL, PANAS_AFFECTIVE_EMOTIONAL_STATE_KEY, PANAS_AFFECTIVE_EMOTIONAL_STATE_VALUE, TRAFFIC_LIGHT_VALUE, VALENCE_STATE_VALUE
+    "NOTIFICATION(DETAIL)", # ACTION, EVENT_TIMESTAMP
+    "TIZEN_LOG(DETAIL)",   # TIZEN_LOG_PAYLOAD
+    "HOW_ACTIVE_DO_YOU_FEEL_AT_THE_MOMENT", # LIKERT_SCALE_FIVE
+    "DO_LATER",            # LIKERT_SCALE_SEVEN
+    "BODY_MOVEMENT",       # DUTCH_POLICE_MOVES, LIKERT_SCALE_THREE
+    "EMOTION_SCALE_FIVE",  # LIKERT_SCALE_FIVE
+    "RECENTLY_EATEN",      # LIKERT_SCALE_FOUR
+    "RECENTLY_COLD_BEVERAGE", # LIKERT_SCALE_THREE
+    "ELDERLY_ACTIVITY",    # CONTEXT, SPEED.AVG
+    "VALENCE",             # LIKERT_SCALE_THREE
+    "AROUSAL",             # LIKERT_SCALE_THREE
+    "LOG_AWARENESS",       # HEARTBEAT, LIGHT, MEETING, SMELL, SOUND, TASTE, TOUCH
+    "SUBJECTIVE_MOOD",     # LIKERT_SCALE_TEN
+    "SUBJECTIVE_EMOTION",  # LIKERT_SCALE_TEN
+    "LOCATION_FAMILIARITY", # LIKERT_SCALE_FIVE
+    "PEOPLE_COMPANY",      # LIKERT_SCALE_SIX
+    "VISIT_APP_PAGE",      # APP_NAME, PAGE_NAME, DURATION_MS
+    "PLAN_MEAL",           # NR_DAYS, NR_MEALS, MEAL_PLAN_JS
+    "NUTRITION_SUMMARY",   # AGGREGATION_LEVEL, SUMMARY_SCORE, CARBS_CONFORMANCE, FAT_CONFORMANCE, FIBER_CONFORMANCE
+    "NUTRITION_DIARY_VID", # DESCRIPTION, IS_COMPLIANT, REF_TO_MEAL_PLAN, MEAL_TOTAL_WEIGHT_ESTIMATED_G, MEAL_CARB_WEIGHT_ESTIMATED_G, VIDEO
+    "GEOFENCE"             # LATITUDE, LONGITUDE, ALTIDUDE, SPEED, ERROR, TIMESTAMP
 ]
 
 # Logging configuration

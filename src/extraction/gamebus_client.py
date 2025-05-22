@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any, Tuple
 import time
 
 from config.credentials import BASE_URL, TOKEN_URL, USER_ID_URL, ACTIVITIES_URL
-from config.settings import MAX_RETRIES, REQUEST_TIMEOUT, VALID_GAME_DESCRIPTORS
+from config.settings import MAX_RETRIES, REQUEST_TIMEOUT, VALID_GAME_DESCRIPTORS, DEFAULT_PAGE_SIZE
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ class GameBusClient:
             logger.error(f"Failed to get user token: {e}")
             return None
 
-    def _fetch_paginated_data(self, data_url: str, token: str, page_size: int = 50) -> Tuple[List[Dict[str, Any]], List[str]]:
+    def _fetch_paginated_data(self, data_url: str, token: str, page_size: int = DEFAULT_PAGE_SIZE) -> Tuple[List[Dict[str, Any]], List[str]]:
         """
         Fetch paginated data from the GameBus API.
 
@@ -213,7 +213,7 @@ class GameBusClient:
             return None
 
     def get_user_data(self, token: str, user_id: int, game_descriptor: str, 
-                       page_size: int = 50, try_all_descriptors: bool = False) -> tuple[List[Dict[str, Any]], str, List[str]]:
+                       page_size: int = DEFAULT_PAGE_SIZE, try_all_descriptors: bool = False) -> tuple[List[Dict[str, Any]], str, List[str]]:
         """
         Get user data for a specific game descriptor.
 

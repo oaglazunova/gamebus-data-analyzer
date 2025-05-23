@@ -50,6 +50,54 @@ gamebus-data-analyzer/
    - Saving visualizations to the `data_analysis/visualizations` directory
    - Saving statistics to the `data_analysis/statistics` directory
 
+## Available Analyses
+
+The following analyses are available in the GameBus Data Analyzer:
+
+### Activity Analysis
+
+| Analysis | Description | Data Source | Game Descriptors/Parameters |
+|----------|-------------|-------------|---------------------------|
+| Activity Types Distribution | Shows the frequency of different activity types | campaign_data.xlsx (activities sheet) | 'type' column |
+| Activities Over Time | Shows the number of activities recorded each day | campaign_data.xlsx (activities sheet) | 'createdAt' column |
+| Points by Activity Type | Shows the total points awarded for each activity type | campaign_data.xlsx (activities sheet) | 'type', 'rewardedParticipations' columns |
+| User Activity Distribution | Shows the number of activities recorded by each user | campaign_data.xlsx (activities sheet) | 'pid' column |
+| Activity Type by User | Shows how different users engage with different activity types | campaign_data.xlsx (activities sheet) | 'pid', 'type' columns |
+| Dropout Rates | Shows the distribution of time between first and last activity for each user | campaign_data.xlsx (activities sheet) | 'createdAt', 'pid' columns |
+| Active vs Passive Usage | Shows the distribution of app usage time between active and passive usage | campaign_data.xlsx (activities sheet), VISIT_APP_PAGE events with DURATION_MS parameter | 'createdAt', 'pid', 'type', 'properties' columns |
+| Usage by Day of Week | Shows active and passive usage by day of week | campaign_data.xlsx (activities sheet), VISIT_APP_PAGE events with DURATION_MS parameter | 'createdAt', 'pid', 'type', 'properties' columns |
+| Activity Heatmap by Time | Shows when users are most active during the week | campaign_data.xlsx (activities sheet) | 'createdAt', 'hour', 'day_of_week' columns |
+| Activity Types Over Time | Shows how different types of activities contribute to overall engagement | campaign_data.xlsx (activities sheet) | 'date', 'type' columns |
+| User Engagement Heatmap | Shows the engagement patterns of different users over time | campaign_data.xlsx (activities sheet) | 'pid', 'date' columns |
+
+### User Data Analysis
+
+| Analysis | Description | Data Source | Game Descriptors/Parameters |
+|----------|-------------|-------------|---------------------------|
+| Movement Type Distribution | Shows the proportion of different movement types | JSON files in data_raw directory | WALK, RUN, BIKE, TRANSPORT, PHYSICAL_ACTIVITY, GENERAL_ACTIVITY |
+| Calories by Movement Type | Shows the average calories burned for each movement type | JSON files in data_raw directory | WALK, RUN, BIKE, TRANSPORT, PHYSICAL_ACTIVITY, GENERAL_ACTIVITY with KCALORIES parameter |
+| Steps Trend | Shows the distribution and trend of steps over time | JSON files in data_raw directory | WALK, RUN, GENERAL_ACTIVITY with STEPS or STEPS_SUM parameter |
+| Calories Trend | Shows the distribution and trend of calories burned over time | JSON files in data_raw directory | WALK, RUN, BIKE with KCALORIES parameter |
+| Activity Providers | Shows the distribution of activities by provider/source | JSON files in data_raw directory | 'data_provider_name' column in activity data |
+| App Page Visits | Shows the distribution of app page visits | JSON files in data_raw directory | VISIT_APP_PAGE with APP_NAME, PAGE_NAME parameters |
+| Heart Rate Distribution | Shows the overall distribution of heart rate measurements | JSON files in data_raw directory | LOG_MOOD with heart rate data |
+| Heart Rate Over Time | Shows how heart rate changes over time for a specific activity | JSON files in data_raw directory | LOG_MOOD with heart rate and timestamp data |
+| Heart Rate by Hour | Shows how heart rate varies by hour of day | JSON files in data_raw directory | LOG_MOOD with heart rate and timestamp data |
+
+### Challenge Analysis
+
+| Analysis | Description | Data Source | Game Descriptors/Parameters |
+|----------|-------------|-------------|---------------------------|
+| Challenge Types Distribution | Shows the frequency of different challenge types | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'type' column |
+| Challenge Points Distribution | Shows the distribution of points awarded for challenges | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'points' column |
+| Points by Challenge Type | Shows the distribution of points for each challenge type | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'type', 'points' columns |
+| Challenge Difficulty Distribution | Shows the distribution of challenge difficulties | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'difficulty' column |
+| Points by Difficulty | Shows the relationship between difficulty and points | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'difficulty', 'points' columns |
+| Challenge Completion Rate | Shows the distribution of challenge completion rates | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'completion_rate' column |
+| Completion Rate by Challenge Type | Shows the completion rate for each challenge type | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'type', 'completion_rate' columns |
+| Challenge Completion Status by Type | Shows the proportion of completed vs. incomplete challenges by type | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'type', 'completion_rate' columns |
+| Challenge Completion Heatmap | Shows challenge completion rates by type and difficulty | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'type', 'difficulty', 'completion_rate' columns |
+
 ## Complete Setup Guide
 
 ### Step 1: Install Python
@@ -140,30 +188,48 @@ user@example.com     | password123  |
 
 With your virtual environment activated, you can run the script using various commands:
 
-1. **Basic usage** (extracts all data for all users):
+1. **Basic usage** (extracts all data for all users and runs analysis):
    ```
    python pipeline.py
    ```
 
-2. **Process a specific user**:
+2. **Process a specific user** (only extracts data for a specific user, does not run analysis):
    ```
    python pipeline.py --user-id 12345
    ```
 
-3. **Run data analysis on existing data**:
+3. **Only extract data** (extracts all data for all users without running analysis):
+   ```
+   python pipeline.py --extract
+   ```
+
+4. **Only run data analysis** on existing data (without extracting new data):
    ```
    python pipeline.py --analyze
    ```
 
-4. **Change logging level** (for more or less detailed output):
+5. **Change logging level** (for more or less detailed output):
    ```
    python pipeline.py --log-level DEBUG
    ```
 
-5. **Extract data and run analysis in one command**:
+6. **Generate test data** (creates synthetic test data for development and testing):
    ```
-   python pipeline.py --analyze
+   python src\scripts\generate_test_data.py
    ```
+   This script generates test data for multiple users with various game descriptors. It uses property schemes from the `config\property_schemes.py` file to enhance data generation. The script:
+   - Loads property schemes from the config file
+   - Uses these schemes to determine appropriate parameters for each game descriptor
+   - Generates random values based on property types, units, and other attributes
+   - Saves the generated data to JSON files in the `data_raw` directory
+
+   If the config file doesn't contain information for a particular game descriptor, the script falls back to hardcoded parameters.
+
+   To update the property schemes in the config file from the Excel file:
+   ```
+   python src\scripts\update_property_schemes.py
+   ```
+   This script reads the `HW8-database-bootstrap.xlsx` file in the `api docs` folder and updates the `config\property_schemes.py` file with the extracted property schemes. This is only needed when the Excel file has been updated with new property schemes.
 
 ### Troubleshooting Common Issues
 
@@ -189,7 +255,7 @@ With your virtual environment activated, you can run the script using various co
 
 ### Performance Optimizations
 
-The framework includes several optimizations to improve performance:
+The script includes several optimizations to improve performance:
 
 1. **Parallel Processing**: Multiple users are processed concurrently using thread pools
 2. **Caching**: API responses are cached to reduce redundant API calls

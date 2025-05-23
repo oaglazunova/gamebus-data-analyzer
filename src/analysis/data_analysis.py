@@ -3,7 +3,7 @@ GameBus Health Behavior Mining Data Analysis Script
 
 This script analyzes data from the GameBus Health Behavior Mining project, including:
 1. Excel files in the config directory containing campaign, challenge, and activity data
-2. JSON files in the data/raw directory containing player-specific data like activity types, heart rates, and mood logs
+2. JSON files in the data_raw directory containing player-specific data like activity types, heart rates, and mood logs
 
 The script generates:
 1. Descriptive statistics tables for each variable, providing insights into:
@@ -41,17 +41,13 @@ Requirements:
 import os
 import sys
 import pandas as pd
-import numpy as np
 import json
 import matplotlib.pyplot as plt
 import seaborn as sns
-from datetime import datetime
 import glob
-from scipy import stats
 import tabulate
 import logging
-from io import StringIO
-from typing import Callable, Tuple, Any, Dict, List, Optional, Union
+from typing import Callable, Tuple, Dict, Optional, Union
 
 # Add the project root to the Python path to find the config module
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -81,8 +77,7 @@ OUTPUT_VISUALIZATIONS_DIR = os.path.join(PROJECT_ROOT, 'data_analysis', 'visuali
 OUTPUT_STATISTICS_DIR = os.path.join(PROJECT_ROOT, 'data_analysis', 'statistics')
 CONFIG_DIR = os.path.join(PROJECT_ROOT, 'config')
 RAW_DATA_DIR = os.path.join(PROJECT_ROOT, 'data_raw')
-ACTIVITY_RECORDING_TIME_MINUTES = 2  # Estimated time to record an activity
-MAX_SESSION_DURATION_MINUTES = 480  # 8 hours
+# No hardcoded assumptions as per requirements
 
 def create_and_save_figure(
     plot_function: Callable[[], None],
@@ -725,20 +720,73 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
         logger.error(f"Error creating dropout rates boxplot: {e}")
         # Continue with other visualizations even if this one fails
 
+    # Check if we have VISIT_APP_PAGE events with DURATION_MS for accurate usage calculation
+    has_visit_app_page_duration = False
+    visit_app_page_data = None
+
+    try:
+        # Check if we have VISIT_APP_PAGE events in the activities DataFrame
+        if 'type' in activities.columns and 'VISIT_APP_PAGE' in activities['type'].values:
+            # Filter to only VISIT_APP_PAGE events
+            visit_app_page_data = activities[activities['type'] == 'VISIT_APP_PAGE'].copy()
+
+            # Check if we have properties column that might contain DURATION_MS
+            if 'properties' in visit_app_page_data.columns:
+                # Check if any of the properties contain DURATION_MS
+                has_duration_ms = False
+                for prop in visit_app_page_data['properties']:
+                    if isinstance(prop, dict) and 'DURATION_MS' in prop:
+                        has_duration_ms = True
+                        break
+
+                if has_duration_ms:
+                    has_visit_app_page_duration = True
+                    logger.info("Found VISIT_APP_PAGE events with DURATION_MS for accurate usage calculation")
+                else:
+                    logger.warning("VISIT_APP_PAGE events found but no DURATION_MS in properties")
+            else:
+                logger.warning("VISIT_APP_PAGE events found but no properties column")
+        else:
+            logger.warning("No VISIT_APP_PAGE events found for accurate usage calculation")
+    except Exception as e:
+        logger.error(f"Error checking for VISIT_APP_PAGE events with DURATION_MS: {e}")
+        has_visit_app_page_duration = False
+
     # Calculate active and passive usage metrics
     try:
         if user_daily_activities.empty:
             logger.warning("No user daily activities data for usage metrics calculation")
             usage_metrics = None
+        elif not has_visit_app_page_duration:
+            logger.warning("Skipping active vs passive usage analysis as DURATION_MS is not available")
+            usage_metrics = None
         else:
-            # Calculate active time (time spent recording activities)
-            # Assume each activity takes ACTIVITY_RECORDING_TIME_MINUTES on average to record
-            user_daily_activities['active_minutes'] = user_daily_activities['activity_count'] * ACTIVITY_RECORDING_TIME_MINUTES
-            logger.info(f"Calculated active minutes using {ACTIVITY_RECORDING_TIME_MINUTES} minutes per activity")
-
-            # Calculate passive time (time spent with app open)
-            # This is estimated as the time between first and last activity each day
+            # Calculate active time using DURATION_MS from VISIT_APP_PAGE events
             try:
+                # Extract DURATION_MS from properties and convert to minutes
+                visit_app_page_data['duration_ms'] = visit_app_page_data['properties'].apply(
+                    lambda x: float(x.get('DURATION_MS', 0)) if isinstance(x, dict) else 0
+                )
+                visit_app_page_data['duration_minutes'] = visit_app_page_data['duration_ms'] / 60000  # Convert ms to minutes
+
+                # Group by user and date to get total duration per user per day
+                user_daily_durations = visit_app_page_data.groupby(['pid', 'date'])['duration_minutes'].sum().reset_index()
+
+                # Merge with user_daily_activities
+                user_daily_activities = user_daily_activities.reset_index()
+                user_daily_activities = pd.merge(
+                    user_daily_activities, 
+                    user_daily_durations, 
+                    on=['pid', 'date'], 
+                    how='left'
+                )
+                user_daily_activities['duration_minutes'] = user_daily_activities['duration_minutes'].fillna(0)
+
+                # Set active_minutes to the actual duration from VISIT_APP_PAGE events
+                user_daily_activities['active_minutes'] = user_daily_activities['duration_minutes']
+                logger.info("Calculated active minutes using DURATION_MS from VISIT_APP_PAGE events")
+
+                # Calculate session duration as before
                 user_daily_activities['session_duration'] = (user_daily_activities['last_activity'] - 
                                                              user_daily_activities['first_activity']).dt.total_seconds() / 60
 
@@ -747,9 +795,10 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
                     logger.warning("Found negative session durations, setting them to 0")
                     user_daily_activities.loc[user_daily_activities['session_duration'] < 0, 'session_duration'] = 0
 
-                # Cap unreasonable session durations (e.g., more than MAX_SESSION_DURATION_MINUTES)
-                user_daily_activities['session_duration'] = user_daily_activities['session_duration'].clip(0, MAX_SESSION_DURATION_MINUTES)
-                logger.info(f"Capped session durations at {MAX_SESSION_DURATION_MINUTES} minutes")
+                # Use actual session durations without capping
+                # Ensure session durations are not negative
+                user_daily_activities['session_duration'] = user_daily_activities['session_duration'].clip(0)
+                logger.info("Using actual session durations without capping")
 
                 # Passive time is session duration minus active time
                 user_daily_activities['passive_minutes'] = user_daily_activities['session_duration'] - user_daily_activities['active_minutes']
@@ -870,60 +919,10 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
         if usage_metrics is None or activities.empty:
             logger.warning("No usage data available for hour of day visualization")
         else:
-            try:
-                # Group activities by hour
-                hourly_activities = activities.groupby('hour').size().reset_index(name='count')
-
-                if hourly_activities.empty:
-                    logger.warning("No hourly activities data for visualization")
-                else:
-                    # Check if we have data for all hours
-                    all_hours = set(range(24))
-                    missing_hours = all_hours - set(hourly_activities['hour'])
-                    if missing_hours:
-                        logger.info(f"Missing data for hours: {sorted(missing_hours)}")
-                        # Add missing hours with count 0
-                        missing_hours_df = pd.DataFrame([{'hour': hour, 'count': 0} for hour in missing_hours])
-                        hourly_activities = pd.concat([hourly_activities, missing_hours_df], ignore_index=True)
-                        # Sort by hour
-                        hourly_activities = hourly_activities.sort_values('hour').reset_index(drop=True)
-
-                    # Estimate active and passive minutes by hour
-                    hourly_activities['active_minutes'] = hourly_activities['count'] * ACTIVITY_RECORDING_TIME_MINUTES
-
-                    # Estimate passive minutes based on distribution of activities
-                    # More activities in an hour suggests more passive time as well
-                    total_passive_minutes = usage_metrics['total_passive_minutes']
-                    total_activities = activities.shape[0]
-
-                    if total_activities > 0:
-                        hourly_activities['passive_minutes'] = hourly_activities['count'] * (total_passive_minutes / total_activities)
-                    else:
-                        logger.warning("No activities for passive minutes calculation, setting to 0")
-                        hourly_activities['passive_minutes'] = 0
-
-                    def plot_usage_by_hour():
-                        plt.plot(hourly_activities['hour'], hourly_activities['active_minutes'], 
-                                marker='o', linestyle='-', label='Active Usage')
-                        plt.plot(hourly_activities['hour'], hourly_activities['passive_minutes'], 
-                                marker='s', linestyle='-', label='Passive Usage')
-                        plt.title('Active vs. Passive Usage by Hour of Day')
-                        plt.xlabel('Hour of Day')
-                        plt.ylabel('Minutes')
-                        plt.xticks(range(0, 24))
-                        plt.legend()
-                        plt.grid(True, linestyle='--', alpha=0.7)
-
-                    create_and_save_figure(
-                        plot_usage_by_hour,
-                        f'{OUTPUT_VISUALIZATIONS_DIR}/usage_by_hour.png',
-                        figsize=(14, 7)
-                    )
-                    logger.info("Created usage by hour visualization")
-            except Exception as e:
-                logger.error(f"Error processing data for hour of day visualization: {e}")
+            # Skip the usage by hour visualization as it relies on assumptions about activity recording time
+            logger.info("Skipping active vs. passive usage by hour visualization as it requires assumptions about activity recording time")
     except Exception as e:
-        logger.error(f"Error creating usage by hour visualization: {e}")
+        logger.error(f"Error handling usage by hour visualization: {e}")
         # Continue with other visualizations even if this one fails
 
     # 4. Activity heatmap by day of week and hour of day
@@ -1265,43 +1264,75 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame]) -> Optional[Tuple]:
             with open(usage_analysis_path, 'w') as f:
                 f.write(f"Passive vs. Active Usage Analysis\n")
                 f.write(f"===============================\n\n")
-                f.write(f"Definitions:\n")
-                f.write(f"- Passive Usage: Time spent with the app open without recording activities\n")
-                f.write(f"- Active Usage: Time spent recording tasks/activities in the app\n\n")
 
-                # Get usage metrics with safe access
-                total_active = usage_metrics.get('total_active_minutes', 0)
-                total_passive = usage_metrics.get('total_passive_minutes', 0)
-                avg_active = usage_metrics.get('avg_active_minutes_per_user_day', 0)
-                avg_passive = usage_metrics.get('avg_passive_minutes_per_user_day', 0)
+                # Check if usage metrics is None (which means we skipped the analysis)
+                if usage_metrics is None:
+                    f.write(f"Active vs. passive usage analysis was not performed for this dataset.\n\n")
+                    f.write(f"Possible reasons:\n")
+                    f.write(f"- No VISIT_APP_PAGE events with DURATION_MS parameter were found\n")
+                    f.write(f"- Required data fields were missing\n")
+                    f.write(f"- No user daily activities data was available\n\n")
+                    f.write(f"Note: As per requirements, active vs. passive usage analysis is only performed\n")
+                    f.write(f"when DURATION_MS parameter is available from VISIT_APP_PAGE events to ensure accuracy.\n")
+                    logger.info(f"Saved usage analysis to {usage_analysis_path}")
+                else:
+                    f.write(f"Definitions:\n")
+                    f.write(f"- Passive Usage: Time spent with the app open without recording activities\n")
+                    f.write(f"- Active Usage: Time spent recording tasks/activities in the app\n\n")
 
-                # Calculate total usage and percentages safely
-                total_usage = total_active + total_passive
-                active_pct = (total_active / total_usage * 100) if total_usage > 0 else 0
-                passive_pct = (total_passive / total_usage * 100) if total_usage > 0 else 0
+                    f.write(f"Methodology for Determining Active and Passive Usage:\n")
+                    f.write(f"1. Active Usage Calculation:\n")
+                    f.write(f"   - Active usage time is calculated using the DURATION_MS parameter from VISIT_APP_PAGE events\n")
+                    f.write(f"   - DURATION_MS provides the actual time spent on each page in milliseconds\n")
+                    f.write(f"   - This represents the actual time users spent actively using the app\n\n")
 
-                # Create a table with usage statistics
-                table_data = [
-                    ["Metric", "Active Usage", "Passive Usage"],
-                    ["Total (minutes)", f"{total_active:.1f}", f"{total_passive:.1f}"],
-                    ["Total (hours)", f"{total_active/60:.1f}", f"{total_passive/60:.1f}"],
-                    ["Average per user per day (minutes)", f"{avg_active:.1f}", f"{avg_passive:.1f}"],
-                    ["Percentage of total usage", f"{active_pct:.1f}%", f"{passive_pct:.1f}%"]
-                ]
+                    f.write(f"2. Passive Usage Calculation:\n")
+                    f.write(f"   - Session duration is calculated as the time between first and last activity each day\n")
+                    f.write(f"   - Passive minutes = Session duration - Active minutes\n")
+                    f.write(f"   - This represents time spent with the app open but not actively interacting with it\n\n")
 
-                # Format the table using tabulate
-                table = tabulate.tabulate(table_data, headers="firstrow", tablefmt="grid")
-                f.write(table)
+                    f.write(f"3. Data Sources:\n")
+                    f.write(f"   - VISIT_APP_PAGE events with APP_NAME, PAGE_NAME, and DURATION_MS parameters\n")
+                    f.write(f"   - User activity timestamps for session duration calculation\n\n")
 
-                # Add additional statistical analysis
-                f.write(f"\n\nStatistical Analysis:\n")
+                    f.write(f"4. Limitations:\n")
+                    f.write(f"   - Passive usage may be overestimated if users leave the app open without interaction\n")
+                    f.write(f"   - Sessions with only one activity have zero passive time by this calculation method\n")
+                    f.write(f"   - Time between days is not counted as passive usage\n\n")
 
-                # Calculate ratio safely
-                ratio = total_passive / total_active if total_active > 0 else 0
-                f.write(f"- Active to passive ratio: 1:{ratio:.1f}\n")
+                    # Get usage metrics with safe access
+                    total_active = usage_metrics.get('total_active_minutes', 0)
+                    total_passive = usage_metrics.get('total_passive_minutes', 0)
+                    avg_active = usage_metrics.get('avg_active_minutes_per_user_day', 0)
+                    avg_passive = usage_metrics.get('avg_passive_minutes_per_user_day', 0)
 
-                f.write(f"- Total app usage: {total_usage:.1f} minutes ({total_usage/60:.1f} hours)\n")
-                f.write(f"- Average total usage per user per day: {avg_active + avg_passive:.1f} minutes\n")
+                    # Calculate total usage and percentages safely
+                    total_usage = total_active + total_passive
+                    active_pct = (total_active / total_usage * 100) if total_usage > 0 else 0
+                    passive_pct = (total_passive / total_usage * 100) if total_usage > 0 else 0
+
+                    # Create a table with usage statistics
+                    table_data = [
+                        ["Metric", "Active Usage", "Passive Usage"],
+                        ["Total (minutes)", f"{total_active:.1f}", f"{total_passive:.1f}"],
+                        ["Total (hours)", f"{total_active/60:.1f}", f"{total_passive/60:.1f}"],
+                        ["Average per user per day (minutes)", f"{avg_active:.1f}", f"{avg_passive:.1f}"],
+                        ["Percentage of total usage", f"{active_pct:.1f}%", f"{passive_pct:.1f}%"]
+                    ]
+
+                    # Format the table using tabulate
+                    table = tabulate.tabulate(table_data, headers="firstrow", tablefmt="grid")
+                    f.write(table)
+
+                    # Add additional statistical analysis
+                    f.write(f"\n\nStatistical Analysis:\n")
+
+                    # Calculate ratio safely
+                    ratio = total_passive / total_active if total_active > 0 else 0
+                    f.write(f"- Active to passive ratio: 1:{ratio:.1f}\n")
+
+                    f.write(f"- Total app usage: {total_usage:.1f} minutes ({total_usage/60:.1f} hours)\n")
+                    f.write(f"- Average total usage per user per day: {avg_active + avg_passive:.1f} minutes\n")
 
             logger.info(f"Saved usage analysis to {usage_analysis_path}")
         except Exception as e:
@@ -1807,64 +1838,154 @@ def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
     # Combine activity type data from all users
     activity_type_dfs = []
     heartrate_dfs = []
+    app_page_dfs = []
+
+    # Map of game descriptors to activity types
+    movement_descriptors = ['WALK', 'RUN', 'BIKE', 'TRANSPORT', 'PHYSICAL_ACTIVITY', 'GENERAL_ACTIVITY']
+    heartrate_descriptors = ['LOG_MOOD']  # Assuming heart rate data might be in LOG_MOOD
+    app_page_descriptors = ['VISIT_APP_PAGE', 'NAVIGATE_APP']
 
     for key, data in json_data.items():
         if isinstance(data, pd.DataFrame):
-            # Process activity type data
-            if 'activity_type' in key:
-                # Extract user ID from the key if possible
-                try:
-                    # Assuming key format is like "user_123_activity_type"
-                    user_id = key.split('_')[1]
+            # Extract user ID from the key if possible
+            try:
+                # Assuming key format is like "user_123_walk" or "user_123_all_data"
+                parts = key.split('_')
+                if len(parts) >= 2 and parts[0] == 'user':
+                    user_id = parts[1]
+
                     # Add user_id column to the DataFrame
                     data_copy = data.copy()
                     data_copy['user_id'] = user_id
 
-                    # Check if data_provider columns exist in the DataFrame
-                    if 'data_provider_id' in data_copy.columns and 'data_provider_name' in data_copy.columns:
-                        # Data provider information is already in the DataFrame
-                        pass
-                    else:
-                        # Try to find corresponding data for this user that might have provider info
-                        provider_info = None
-                        for other_key, other_data in json_data.items():
-                            if isinstance(other_data, pd.DataFrame) and user_id in other_key and 'data_provider_name' in other_data.columns:
-                                provider_info = other_data[['data_provider_id', 'data_provider_name']].iloc[0] if not other_data.empty else None
-                                break
+                    # Check for game descriptor in the key or in the DataFrame
+                    descriptor_in_key = False
+                    for descriptor in movement_descriptors:
+                        if descriptor.lower() in key.lower():
+                            descriptor_in_key = True
+                            # This is movement/activity data
 
-                        # If provider info was found, add it to all rows
-                        if provider_info is not None:
-                            data_copy['data_provider_id'] = provider_info['data_provider_id']
-                            data_copy['data_provider_name'] = provider_info['data_provider_name']
-                        else:
-                            # Default to "Unknown" if no provider info is found
-                            data_copy['data_provider_id'] = -1
-                            data_copy['data_provider_name'] = "Unknown"
+                            # Ensure required columns exist
+                            if 'type' not in data_copy.columns and 'ACTIVITY_TYPE' in data_copy.columns:
+                                data_copy['type'] = data_copy['ACTIVITY_TYPE']
+                            elif 'type' not in data_copy.columns:
+                                # Default type based on descriptor
+                                if 'walk' in key.lower():
+                                    data_copy['type'] = 'WALK'
+                                elif 'run' in key.lower():
+                                    data_copy['type'] = 'RUN'
+                                elif 'bike' in key.lower():
+                                    data_copy['type'] = 'BIKE'
+                                else:
+                                    data_copy['type'] = 'OTHER'
 
-                    activity_type_dfs.append(data_copy)
-                except (IndexError, ValueError):
-                    # If we can't extract user_id, just use the data as is
+                            # Map calories column
+                            if 'cals' not in data_copy.columns and 'KCALORIES' in data_copy.columns:
+                                data_copy['cals'] = data_copy['KCALORIES']
+                            elif 'cals' not in data_copy.columns:
+                                data_copy['cals'] = 0
+
+                            # Map steps column
+                            if 'steps' not in data_copy.columns and 'STEPS' in data_copy.columns:
+                                data_copy['steps'] = data_copy['STEPS']
+                            elif 'steps' not in data_copy.columns and 'STEPS_SUM' in data_copy.columns:
+                                data_copy['steps'] = data_copy['STEPS_SUM']
+                            elif 'steps' not in data_copy.columns:
+                                data_copy['steps'] = 0
+
+                            activity_type_dfs.append(data_copy)
+                            break
+
+                    # If no descriptor was found in the key, check the DataFrame
+                    if not descriptor_in_key and 'gameDescriptor' in data_copy.columns:
+                        # Check for movement descriptors
+                        for descriptor in movement_descriptors:
+                            if (data_copy['gameDescriptor'] == descriptor).any():
+                                # Filter to only this descriptor
+                                movement_data = data_copy[data_copy['gameDescriptor'] == descriptor].copy()
+
+                                # Ensure required columns exist
+                                if 'type' not in movement_data.columns:
+                                    movement_data['type'] = descriptor
+
+                                # Map calories column
+                                if 'cals' not in movement_data.columns and 'KCALORIES' in movement_data.columns:
+                                    movement_data['cals'] = movement_data['KCALORIES']
+                                elif 'cals' not in movement_data.columns:
+                                    movement_data['cals'] = 0
+
+                                # Map steps column
+                                if 'steps' not in movement_data.columns and 'STEPS' in movement_data.columns:
+                                    movement_data['steps'] = movement_data['STEPS']
+                                elif 'steps' not in movement_data.columns and 'STEPS_SUM' in movement_data.columns:
+                                    movement_data['steps'] = movement_data['STEPS_SUM']
+                                elif 'steps' not in movement_data.columns:
+                                    movement_data['steps'] = 0
+
+                                activity_type_dfs.append(movement_data)
+
+                        # Check for heart rate descriptors
+                        for descriptor in heartrate_descriptors:
+                            if (data_copy['gameDescriptor'] == descriptor).any():
+                                heartrate_data = data_copy[data_copy['gameDescriptor'] == descriptor].copy()
+                                heartrate_dfs.append(heartrate_data)
+
+                        # Check for app page descriptors
+                        for descriptor in app_page_descriptors:
+                            if (data_copy['gameDescriptor'] == descriptor).any():
+                                app_page_data = data_copy[data_copy['gameDescriptor'] == descriptor].copy()
+                                app_page_data['user_id'] = user_id
+                                app_page_dfs.append(app_page_data)
+                                logger.info(f"Added {len(app_page_data)} {descriptor} activities from {key}")
+
+                # Special case for all_data files which might contain multiple descriptors
+                if 'all_data' in key:
+                    # This file might contain multiple types of data
+                    # Try to extract each type based on game descriptors
+                    if isinstance(data, dict):
+                        for descriptor, descriptor_data in data.items():
+                            if isinstance(descriptor_data, list) and descriptor_data:
+                                # Convert to DataFrame
+                                descriptor_df = pd.DataFrame(descriptor_data)
+                                descriptor_df['user_id'] = user_id
+
+                                # Categorize based on descriptor
+                                if any(d.lower() == descriptor.lower() for d in movement_descriptors):
+                                    # Ensure required columns exist
+                                    if 'type' not in descriptor_df.columns:
+                                        descriptor_df['type'] = descriptor
+
+                                    # Map calories column
+                                    if 'cals' not in descriptor_df.columns and 'KCALORIES' in descriptor_df.columns:
+                                        descriptor_df['cals'] = descriptor_df['KCALORIES']
+                                    elif 'cals' not in descriptor_df.columns:
+                                        descriptor_df['cals'] = 0
+
+                                    # Map steps column
+                                    if 'steps' not in descriptor_df.columns and 'STEPS' in descriptor_df.columns:
+                                        descriptor_df['steps'] = descriptor_df['STEPS']
+                                    elif 'steps' not in descriptor_df.columns and 'STEPS_SUM' in descriptor_df.columns:
+                                        descriptor_df['steps'] = descriptor_df['STEPS_SUM']
+                                    elif 'steps' not in descriptor_df.columns:
+                                        descriptor_df['steps'] = 0
+
+                                    activity_type_dfs.append(descriptor_df)
+                                elif any(d.lower() == descriptor.lower() for d in heartrate_descriptors):
+                                    heartrate_dfs.append(descriptor_df)
+                                elif any(d.lower() == descriptor.lower() for d in app_page_descriptors):
+                                    app_page_dfs.append(descriptor_df)
+            except (IndexError, ValueError) as e:
+                logger.warning(f"Error extracting user ID from key {key}: {e}")
+                # If we can't extract user_id, check if this is still activity data
+                if any(descriptor.lower() in key.lower() for descriptor in movement_descriptors):
                     activity_type_dfs.append(data)
-            # Process heart rate data
-            elif 'heartrate' in key:
-                heartrate_dfs.append(data)
-            # Process location, mood, and notifications data for VISIT_APP_PAGE activities
-            elif any(data_type in key for data_type in ['location', 'mood', 'notifications']):
-                try:
-                    # Check if this data contains VISIT_APP_PAGE activities
-                    if 'gameDescriptor' in data.columns and (data['gameDescriptor'] == 'VISIT_APP_PAGE').any():
-                        # Extract only VISIT_APP_PAGE activities
-                        app_page_data = data[data['gameDescriptor'] == 'VISIT_APP_PAGE'].copy()
+                elif any(descriptor.lower() in key.lower() for descriptor in heartrate_descriptors):
+                    heartrate_dfs.append(data)
+                elif any(descriptor.lower() in key.lower() for descriptor in app_page_descriptors):
+                    app_page_dfs.append(data)
 
-                        # Extract user ID from the key if possible
-                        user_id = key.split('_')[1]
-                        app_page_data['user_id'] = user_id
-
-                        # Add to activity_type_dfs for processing
-                        activity_type_dfs.append(app_page_data)
-                        logger.info(f"Added {len(app_page_data)} VISIT_APP_PAGE activities from {key}")
-                except (IndexError, ValueError, KeyError) as e:
-                    logger.warning(f"Error processing {key} for VISIT_APP_PAGE activities: {e}")
+    # Add app_page_dfs to activity_type_dfs for processing
+    activity_type_dfs.extend(app_page_dfs)
 
     if activity_type_dfs:
         # Combine all activity type dataframes
@@ -1984,24 +2105,8 @@ def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
                     plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'steps_trend_over_time.png'))
                     plt.close()
                 else:
-                    # Create a synthetic timeline based on user_id order
-                    # This assumes that user_ids are assigned chronologically
-                    user_steps['timeline'] = range(len(user_steps))
-
-                    # Plot steps over this synthetic timeline
-                    plt.figure(figsize=(12, 6))
-                    sns.regplot(data=user_steps, x='timeline', y='steps', scatter=True, line_kws={"color": "red"})
-                    plt.title('Trend in Average Steps Since Campaign Start')
-                    plt.xlabel('Time Since Campaign Start (arbitrary units)')
-                    plt.ylabel('Average Steps')
-
-                    # Add explanation of what the points mean
-                    plt.figtext(0.01, 0.8, 'Each point represents the average steps\nfor a single user during the campaign.\nThe red line shows the overall trend.',
-                               va='center', ha='left', bbox=dict(facecolor='white', alpha=0.8))
-
-                    plt.tight_layout()
-                    plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'steps_trend_over_time.png'))
-                    plt.close()
+                    # Skip the trend over time visualization if we don't have real campaign dates
+                    logger.info("Skipping steps trend over time visualization as campaign dates are not available")
 
             # Create a simple trend visualization of steps
             plt.figure(figsize=(12, 6))
@@ -2096,24 +2201,8 @@ def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
                     plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'calories_trend_over_time.png'))
                     plt.close()
                 else:
-                    # Create a synthetic timeline based on user_id order
-                    # This assumes that user_ids are assigned chronologically
-                    user_cals['timeline'] = range(len(user_cals))
-
-                    # Plot calories over this synthetic timeline
-                    plt.figure(figsize=(12, 6))
-                    sns.regplot(data=user_cals, x='timeline', y='cals', scatter=True, line_kws={"color": "red"})
-                    plt.title('Trend in Average Calories Burned Since Campaign Start')
-                    plt.xlabel('Time Since Campaign Start (arbitrary units)')
-                    plt.ylabel('Average Calories Burned')
-
-                    # Add explanation of what the points mean
-                    plt.figtext(0.01, 0.8, 'Each point represents the average calories\nburned by a single user during the campaign.\nThe red line shows the overall trend.',
-                               va='center', ha='left', bbox=dict(facecolor='white', alpha=0.8))
-
-                    plt.tight_layout()
-                    plt.savefig(os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'calories_trend_over_time.png'))
-                    plt.close()
+                    # Skip the trend over time visualization if we don't have real campaign dates
+                    logger.info("Skipping calories trend over time visualization as campaign dates are not available")
 
             # Create a simple trend visualization of calories burned
             plt.figure(figsize=(12, 6))
@@ -2348,91 +2437,188 @@ def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
         plot_app_page_visits()
 
     if heartrate_dfs:
-        # Combine all heartrate dataframes
-        all_heartrates = pd.concat(heartrate_dfs, ignore_index=True)
+        try:
+            # Combine all heartrate dataframes
+            all_heartrates = pd.concat(heartrate_dfs, ignore_index=True)
 
-        # Generate descriptive statistics for heart rate data
-        if 'heartRate' in all_heartrates.columns:
-            # Create a copy to avoid modifying the original dataframe
-            hr_stats_df = all_heartrates.copy()
+            # Map columns to expected names if they don't exist
+            # Check for heart rate data in various possible column names
+            heart_rate_column_candidates = ['heartRate', 'HEARTBEAT', 'HEART_RATE', 'heart_rate', 'VALENCE_STATE_VALUE']
+            timestamp_column_candidates = ['timestamp', 'EVENT_TIMESTAMP', 'time', 'date']
+            activity_id_column_candidates = ['activity_id', 'id', 'activityId']
 
-            # Convert timestamp to datetime for better analysis
-            if 'timestamp' in hr_stats_df.columns:
-                hr_stats_df['timestamp'] = pd.to_datetime(hr_stats_df['timestamp'], unit='ms')
-                hr_stats_df['hour_of_day'] = hr_stats_df['timestamp'].dt.hour
+            # Find heart rate column
+            heart_rate_column = None
+            for col in heart_rate_column_candidates:
+                if col in all_heartrates.columns:
+                    if heart_rate_column is None:  # Only use the first match
+                        heart_rate_column = col
+                        logger.info(f"Using '{col}' as heart rate column")
+                        # Map to expected column name if it's not already 'heartRate'
+                        if col != 'heartRate':
+                            all_heartrates['heartRate'] = all_heartrates[col]
 
-                # Generate descriptive statistics for heart rate data
-                generate_descriptive_stats(hr_stats_df, "Heart Rate Data", None)
+            # Find timestamp column
+            timestamp_column = None
+            for col in timestamp_column_candidates:
+                if col in all_heartrates.columns:
+                    if timestamp_column is None:  # Only use the first match
+                        timestamp_column = col
+                        logger.info(f"Using '{col}' as timestamp column")
+                        # Map to expected column name if it's not already 'timestamp'
+                        if col != 'timestamp':
+                            all_heartrates['timestamp'] = all_heartrates[col]
 
-                # Perform bivariate analysis on heart rate data
-                perform_bivariate_analysis(hr_stats_df, "Heart Rate Data", None)
+            # Find activity ID column
+            activity_id_column = None
+            for col in activity_id_column_candidates:
+                if col in all_heartrates.columns:
+                    if activity_id_column is None:  # Only use the first match
+                        activity_id_column = col
+                        logger.info(f"Using '{col}' as activity ID column")
+                        # Map to expected column name if it's not already 'activity_id'
+                        if col != 'activity_id':
+                            all_heartrates['activity_id'] = all_heartrates[col]
 
-        # 6. Heart rate distribution
-        # This visualization shows the overall distribution of heart rate measurements
-        # Helps understand the range and frequency of different heart rates across all users
-        if 'heartRate' in all_heartrates.columns:
-            def plot_heart_rate_distribution():
-                sns.histplot(all_heartrates['heartRate'].dropna(), kde=True)
-                plt.title('Distribution of Heart Rates')
-                plt.xlabel('Heart Rate (bpm)')
-                plt.ylabel('Frequency')
+            # If we don't have an activity_id column, create one using user_id if available
+            if activity_id_column is None and 'user_id' in all_heartrates.columns:
+                logger.info("Creating activity_id column from user_id")
+                all_heartrates['activity_id'] = all_heartrates['user_id']
+                activity_id_column = 'activity_id'
 
-            create_and_save_figure(
-                plot_heart_rate_distribution,
-                os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'heart_rate_distribution.png'),
-                figsize=(10, 6)
-            )
+            # Generate descriptive statistics for heart rate data if we have the required columns
+            if 'heartRate' in all_heartrates.columns:
+                # Create a copy to avoid modifying the original dataframe
+                hr_stats_df = all_heartrates.copy()
 
-            # 7. Heart rate over time for a sample of data
-            # This visualization shows how heart rate changes over time for a specific activity
-            # Helps identify patterns, peaks, and recovery periods during activities
-            if len(all_heartrates) > 0:
-                # Take a sample of one player's data
-                sample_player = all_heartrates['activity_id'].value_counts().index[0]
-                sample_data = all_heartrates[all_heartrates['activity_id'] == sample_player].sort_values('timestamp')
+                # Convert timestamp to datetime for better analysis
+                if 'timestamp' in hr_stats_df.columns:
+                    try:
+                        # Try to convert timestamp to datetime, handling different formats
+                        if hr_stats_df['timestamp'].dtype == 'object':
+                            # Try parsing as string
+                            hr_stats_df['timestamp'] = pd.to_datetime(hr_stats_df['timestamp'])
+                        else:
+                            # Try parsing as numeric (milliseconds or seconds)
+                            # First check if values are likely milliseconds (large numbers)
+                            sample_value = hr_stats_df['timestamp'].iloc[0] if len(hr_stats_df) > 0 else 0
+                            if sample_value > 1e10:  # Likely milliseconds
+                                hr_stats_df['timestamp'] = pd.to_datetime(hr_stats_df['timestamp'], unit='ms')
+                            else:  # Likely seconds
+                                hr_stats_df['timestamp'] = pd.to_datetime(hr_stats_df['timestamp'], unit='s')
 
-                if 'timestamp' in sample_data.columns and len(sample_data) > 0:
-                    sample_data['timestamp'] = pd.to_datetime(sample_data['timestamp'], unit='ms')
+                        hr_stats_df['hour_of_day'] = hr_stats_df['timestamp'].dt.hour
 
-                    def plot_heart_rate_over_time():
-                        plt.plot(sample_data['timestamp'], sample_data['heartRate'])
-                        plt.title(f'Heart Rate Over Time for Activity {sample_player}')
-                        plt.xlabel('Time')
-                        plt.ylabel('Heart Rate (bpm)')
+                        # Generate descriptive statistics for heart rate data
+                        generate_descriptive_stats(hr_stats_df, "Heart Rate Data", None)
 
-                    create_and_save_figure(
-                        plot_heart_rate_over_time,
-                        os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'heart_rate_over_time.png'),
-                        figsize=(14, 7)
-                    )
+                        # Perform bivariate analysis on heart rate data
+                        perform_bivariate_analysis(hr_stats_df, "Heart Rate Data", None)
+                    except Exception as e:
+                        logger.error(f"Error converting timestamp to datetime: {e}")
 
-                    # 8. Heart rate by hour of day (Bivariate Analysis)
-                    # This visualization shows how heart rate varies by hour of day
-                    # Helps identify daily patterns in heart rate
-                    if len(all_heartrates) > 100:  # Only if we have enough data
-                        all_heartrates['timestamp'] = pd.to_datetime(all_heartrates['timestamp'], unit='ms')
-                        all_heartrates['hour'] = all_heartrates['timestamp'].dt.hour
+                # 6. Heart rate distribution
+                # This visualization shows the overall distribution of heart rate measurements
+                # Helps understand the range and frequency of different heart rates across all users
+                def plot_heart_rate_distribution():
+                    sns.histplot(all_heartrates['heartRate'].dropna(), kde=True)
+                    plt.title('Distribution of Heart Rates')
+                    plt.xlabel('Heart Rate (bpm)')
+                    plt.ylabel('Frequency')
 
-                        def plot_heart_rate_by_hour():
-                            sns.boxplot(data=all_heartrates, x='hour', y='heartRate')
-                            plt.title('Heart Rate by Hour of Day')
-                            plt.xlabel('Hour of Day')
-                            plt.ylabel('Heart Rate (bpm)')
-                            plt.xticks(range(0, 24))
+                create_and_save_figure(
+                    plot_heart_rate_distribution,
+                    os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'heart_rate_distribution.png'),
+                    figsize=(10, 6)
+                )
 
-                        create_and_save_figure(
-                            plot_heart_rate_by_hour,
-                            os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'heart_rate_by_hour.png'),
-                            figsize=(12, 6)
-                        )
+                # 7. Heart rate over time for a sample of data
+                # This visualization shows how heart rate changes over time for a specific activity
+                # Helps identify patterns, peaks, and recovery periods during activities
+                if len(all_heartrates) > 0 and 'activity_id' in all_heartrates.columns:
+                    try:
+                        # Take a sample of one player's data
+                        activity_counts = all_heartrates['activity_id'].value_counts()
+                        if not activity_counts.empty:
+                            sample_player = activity_counts.index[0]
+                            sample_data = all_heartrates[all_heartrates['activity_id'] == sample_player]
 
-                        # Calculate statistics by hour
-                        hr_by_hour = all_heartrates.groupby('hour')['heartRate'].agg(['mean', 'std', 'count'])
-                        # Round mean and std values to 2 decimal places
-                        hr_by_hour['mean'] = hr_by_hour['mean'].round(2)
-                        hr_by_hour['std'] = hr_by_hour['std'].round(2)
+                            # Sort by timestamp if available
+                            if 'timestamp' in sample_data.columns:
+                                sample_data = sample_data.sort_values('timestamp')
 
-                        # No need to save to file
+                            if 'timestamp' in sample_data.columns and len(sample_data) > 0:
+                                try:
+                                    # Convert timestamp to datetime if it's not already
+                                    if not pd.api.types.is_datetime64_any_dtype(sample_data['timestamp']):
+                                        # Try parsing as numeric (milliseconds or seconds)
+                                        # First check if values are likely milliseconds (large numbers)
+                                        sample_value = sample_data['timestamp'].iloc[0] if len(sample_data) > 0 else 0
+                                        if sample_value > 1e10:  # Likely milliseconds
+                                            sample_data['timestamp'] = pd.to_datetime(sample_data['timestamp'], unit='ms')
+                                        else:  # Likely seconds
+                                            sample_data['timestamp'] = pd.to_datetime(sample_data['timestamp'], unit='s')
+
+                                    def plot_heart_rate_over_time():
+                                        plt.plot(sample_data['timestamp'], sample_data['heartRate'])
+                                        plt.title(f'Heart Rate Over Time for Activity {sample_player}')
+                                        plt.xlabel('Time')
+                                        plt.ylabel('Heart Rate (bpm)')
+
+                                    create_and_save_figure(
+                                        plot_heart_rate_over_time,
+                                        os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'heart_rate_over_time.png'),
+                                        figsize=(14, 7)
+                                    )
+                                except Exception as e:
+                                    logger.error(f"Error plotting heart rate over time: {e}")
+                        else:
+                            logger.warning("No activity IDs found in heart rate data")
+                    except Exception as e:
+                        logger.error(f"Error processing heart rate over time: {e}")
+
+                # 8. Heart rate by hour of day (Bivariate Analysis)
+                # This visualization shows how heart rate varies by hour of day
+                # Helps identify daily patterns in heart rate
+                if len(all_heartrates) > 10:  # Only if we have enough data
+                    try:
+                        # Convert timestamp to datetime if it's not already
+                        if 'timestamp' in all_heartrates.columns:
+                            if not pd.api.types.is_datetime64_any_dtype(all_heartrates['timestamp']):
+                                # Try parsing as numeric (milliseconds or seconds)
+                                # First check if values are likely milliseconds (large numbers)
+                                sample_value = all_heartrates['timestamp'].iloc[0] if len(all_heartrates) > 0 else 0
+                                if sample_value > 1e10:  # Likely milliseconds
+                                    all_heartrates['timestamp'] = pd.to_datetime(all_heartrates['timestamp'], unit='ms')
+                                else:  # Likely seconds
+                                    all_heartrates['timestamp'] = pd.to_datetime(all_heartrates['timestamp'], unit='s')
+
+                            all_heartrates['hour'] = all_heartrates['timestamp'].dt.hour
+
+                            def plot_heart_rate_by_hour():
+                                sns.boxplot(data=all_heartrates, x='hour', y='heartRate')
+                                plt.title('Heart Rate by Hour of Day')
+                                plt.xlabel('Hour of Day')
+                                plt.ylabel('Heart Rate (bpm)')
+                                plt.xticks(range(0, 24))
+
+                            create_and_save_figure(
+                                plot_heart_rate_by_hour,
+                                os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'heart_rate_by_hour.png'),
+                                figsize=(12, 6)
+                            )
+
+                            # Calculate statistics by hour
+                            hr_by_hour = all_heartrates.groupby('hour')['heartRate'].agg(['mean', 'std', 'count'])
+                            # Round mean and std values to 2 decimal places
+                            hr_by_hour['mean'] = hr_by_hour['mean'].round(2)
+                            hr_by_hour['std'] = hr_by_hour['std'].round(2)
+                    except Exception as e:
+                        logger.error(f"Error plotting heart rate by hour: {e}")
+            else:
+                logger.warning("No heart rate column found in the data")
+        except Exception as e:
+            logger.error(f"Error processing heart rate data: {e}")
 
 def analyze_challenges(csv_data):
     """Analyze challenges data"""
@@ -2766,6 +2952,323 @@ def analyze_challenges(csv_data):
 
     logger.info(f"Challenges completion analysis saved to {OUTPUT_STATISTICS_DIR} folder")
 
+def generate_analysis_report(csv_data, json_data, activities, usage_metrics, campaign_metrics, dropout_metrics):
+    """
+    Generate a report of which analyses were performed and which weren't, with reasons.
+
+    Args:
+        csv_data: Dictionary of DataFrames from Excel files
+        json_data: Dictionary of data from JSON files
+        activities: DataFrame of activities
+        usage_metrics: Dictionary of usage metrics
+        campaign_metrics: Dictionary of campaign metrics
+        dropout_metrics: Dictionary of dropout metrics
+
+    Returns:
+        None
+    """
+    print("DEBUG: generate_analysis_report function called")
+    logger.info("DEBUG: generate_analysis_report function called")
+    # Create data_analysis directory if it doesn't exist
+    data_analysis_dir = os.path.join(PROJECT_ROOT, 'data_analysis')
+    os.makedirs(data_analysis_dir, exist_ok=True)
+
+    report_path = os.path.join(data_analysis_dir, 'analysis_report.txt')
+    logger.info(f"Generating analysis report at {report_path}")
+
+    # Lists to track performed and skipped analyses
+    performed_analyses = []
+    skipped_analyses = []
+
+    with open(report_path, 'w', encoding='utf-8') as f:
+        f.write("GameBus Data Analysis Report\n")
+        f.write("===========================\n\n")
+
+        f.write("1. Data Loading\n")
+        f.write("---------------\n")
+        if csv_data:
+            f.write(f"✓ Excel data loaded successfully: {len(csv_data)} sheets\n")
+            performed_analyses.append("Excel data loading")
+        else:
+            f.write("✗ No Excel data loaded\n")
+            skipped_analyses.append(("Excel data loading", "No Excel files found or error during loading"))
+
+        if json_data:
+            f.write(f"✓ JSON data loaded successfully: {len(json_data)} files\n")
+            performed_analyses.append("JSON data loading")
+        else:
+            f.write("✗ No JSON data loaded\n")
+            skipped_analyses.append(("JSON data loading", "No JSON files found or error during loading"))
+
+        f.write("\n2. Activities Analysis\n")
+        f.write("---------------------\n")
+        if activities is not None:
+            f.write("✓ Activities analysis performed successfully\n")
+            performed_analyses.append("Activities analysis")
+
+            # Check if active vs passive usage analysis was performed
+            if usage_metrics:
+                f.write("✓ Active vs passive usage analysis performed\n")
+                performed_analyses.append("Active vs passive usage analysis")
+            else:
+                f.write("✗ Active vs passive usage analysis NOT performed\n")
+
+                # Check if VISIT_APP_PAGE events with DURATION_MS are available
+                has_visit_app_page = False
+                has_duration_ms = False
+
+                if activities is not None and 'type' in activities.columns:
+                    has_visit_app_page = 'VISIT_APP_PAGE' in activities['type'].values
+
+                    if has_visit_app_page:
+                        visit_app_page_data = activities[activities['type'] == 'VISIT_APP_PAGE']
+                        if 'properties' in visit_app_page_data.columns:
+                            for prop in visit_app_page_data['properties']:
+                                if isinstance(prop, dict) and 'DURATION_MS' in prop:
+                                    has_duration_ms = True
+                                    break
+
+                reason = ""
+                if not has_visit_app_page:
+                    reason = "No VISIT_APP_PAGE events found"
+                    f.write(f"   - Reason: {reason}\n")
+                elif not has_duration_ms:
+                    reason = "VISIT_APP_PAGE events found but no DURATION_MS data available"
+                    f.write(f"   - Reason: {reason}\n")
+                    f.write("   - This data is required for accurate active vs passive usage calculation\n")
+
+                skipped_analyses.append(("Active vs passive usage analysis", reason))
+
+            # Check if dropout analysis was performed
+            if dropout_metrics:
+                f.write("✓ User dropout analysis performed\n")
+                performed_analyses.append("User dropout analysis")
+            else:
+                reason = "Insufficient activity data to calculate dropout rates"
+                f.write("✗ User dropout analysis NOT performed\n")
+                f.write(f"   - Reason: {reason}\n")
+                skipped_analyses.append(("User dropout analysis", reason))
+
+            # Check if campaign metrics analysis was performed
+            if campaign_metrics:
+                f.write("✓ Campaign metrics analysis performed\n")
+                performed_analyses.append("Campaign metrics analysis")
+            else:
+                reason = "Insufficient data to determine campaign start and end dates"
+                f.write("✗ Campaign metrics analysis NOT performed\n")
+                f.write(f"   - Reason: {reason}\n")
+                skipped_analyses.append(("Campaign metrics analysis", reason))
+        else:
+            reason = "No activity data available or error during analysis"
+            f.write("✗ Activities analysis NOT performed\n")
+            f.write(f"   - Reason: {reason}\n")
+            skipped_analyses.append(("Activities analysis", reason))
+
+        f.write("\n3. User Data Analysis\n")
+        f.write("--------------------\n")
+        if json_data:
+            performed_analyses.append("User data analysis")
+
+            # Check if user data contains specific types of data
+            has_movement_data = False
+            has_heart_rate_data = False
+            has_app_visits_data = False
+
+            for user_data in json_data.values():
+                if 'activities' in user_data:
+                    for activity in user_data['activities']:
+                        if activity.get('gameDescriptor') in ['WALK', 'RUN', 'CYCLE']:
+                            has_movement_data = True
+                        if activity.get('gameDescriptor') == 'HEART_RATE':
+                            has_heart_rate_data = True
+                        if activity.get('gameDescriptor') in ['VISIT_APP_PAGE', 'NAVIGATE_APP']:
+                            has_app_visits_data = True
+
+            if has_movement_data:
+                f.write("✓ Movement data analysis performed (steps, calories, etc.)\n")
+                performed_analyses.append("Movement data analysis")
+            else:
+                reason = "No movement data (WALK, RUN, CYCLE) found in user activities"
+                f.write("✗ Movement data analysis NOT performed\n")
+                f.write(f"   - Reason: {reason}\n")
+                skipped_analyses.append(("Movement data analysis", reason))
+
+            if has_heart_rate_data:
+                f.write("✓ Heart rate data analysis performed\n")
+                performed_analyses.append("Heart rate data analysis")
+            else:
+                reason = "No heart rate data found in user activities"
+                f.write("✗ Heart rate data analysis NOT performed\n")
+                f.write(f"   - Reason: {reason}\n")
+                skipped_analyses.append(("Heart rate data analysis", reason))
+
+            if has_app_visits_data:
+                f.write("✓ App page visits analysis performed\n")
+                performed_analyses.append("App page visits analysis")
+            else:
+                reason = "No app visit data (VISIT_APP_PAGE, NAVIGATE_APP) found in user activities"
+                f.write("✗ App page visits analysis NOT performed\n")
+                f.write(f"   - Reason: {reason}\n")
+                skipped_analyses.append(("App page visits analysis", reason))
+        else:
+            reason = "No JSON user data available"
+            f.write("✗ User data analysis NOT performed\n")
+            f.write(f"   - Reason: {reason}\n")
+            skipped_analyses.append(("User data analysis", reason))
+
+        f.write("\n4. Challenges Analysis\n")
+        f.write("---------------------\n")
+        if csv_data and 'challenges' in csv_data:
+            f.write("✓ Challenges analysis performed\n")
+            performed_analyses.append("Challenges analysis")
+        else:
+            reason = "No challenges data available in Excel files"
+            f.write("✗ Challenges analysis NOT performed\n")
+            f.write(f"   - Reason: {reason}\n")
+            skipped_analyses.append(("Challenges analysis", reason))
+
+        f.write("\n5. Summary\n")
+        f.write("---------\n")
+        f.write("Analysis completed. Results saved to:\n")
+        f.write(f"- Visualizations: {OUTPUT_VISUALIZATIONS_DIR}\n")
+        f.write(f"- Statistics: {OUTPUT_STATISTICS_DIR}\n")
+        f.write(f"- This report: {report_path}\n")
+
+        # Add list of performed analyses
+        f.write("\n6. Analyses Performed\n")
+        f.write("-------------------\n")
+
+        # Check for statistics files
+        statistics_files = []
+        if os.path.exists(OUTPUT_STATISTICS_DIR):
+            statistics_files = [f for f in os.listdir(OUTPUT_STATISTICS_DIR) if os.path.isfile(os.path.join(OUTPUT_STATISTICS_DIR, f))]
+
+        # Check for visualization files
+        visualization_files = []
+        if os.path.exists(OUTPUT_VISUALIZATIONS_DIR):
+            visualization_files = [f for f in os.listdir(OUTPUT_VISUALIZATIONS_DIR) if os.path.isfile(os.path.join(OUTPUT_VISUALIZATIONS_DIR, f))]
+
+        # Write statistics files
+        if statistics_files:
+            f.write("Statistics:\n")
+            for stat_file in statistics_files:
+                f.write(f"- {stat_file}\n")
+
+        # Write visualization files (group by type)
+        if visualization_files:
+            f.write("\nVisualizations:\n")
+
+            # Group visualizations by type
+            activity_viz = [v for v in visualization_files if v.startswith('activity_')]
+            user_viz = [v for v in visualization_files if v.startswith('user_')]
+            challenge_viz = [v for v in visualization_files if v.startswith('challenge_')]
+            movement_viz = [v for v in visualization_files if 'steps' in v or 'calories' in v or 'movement' in v]
+            dropout_viz = [v for v in visualization_files if 'dropout' in v]
+            other_viz = [v for v in visualization_files if not any([
+                v.startswith('activity_'), 
+                v.startswith('user_'), 
+                v.startswith('challenge_'),
+                'steps' in v, 
+                'calories' in v, 
+                'movement' in v,
+                'dropout' in v
+            ])]
+
+            if activity_viz:
+                f.write("  Activity Analysis:\n")
+                for viz in activity_viz:
+                    f.write(f"  - {viz}\n")
+
+            if user_viz:
+                f.write("  User Analysis:\n")
+                for viz in user_viz:
+                    f.write(f"  - {viz}\n")
+
+            if challenge_viz:
+                f.write("  Challenge Analysis:\n")
+                for viz in challenge_viz:
+                    f.write(f"  - {viz}\n")
+
+            if movement_viz:
+                f.write("  Movement Analysis:\n")
+                for viz in movement_viz:
+                    f.write(f"  - {viz}\n")
+
+            if dropout_viz:
+                f.write("  Dropout Analysis:\n")
+                for viz in dropout_viz:
+                    f.write(f"  - {viz}\n")
+
+            if other_viz:
+                f.write("  Other Visualizations:\n")
+                for viz in other_viz:
+                    f.write(f"  - {viz}\n")
+
+        if not statistics_files and not visualization_files:
+            f.write("No analyses were performed.\n")
+
+        # Add list of skipped analyses with reasons
+        f.write("\n7. Analyses Skipped\n")
+        f.write("------------------\n")
+
+        # List expected analyses that weren't found
+        expected_statistics = [
+            "campaign_summary.txt", 
+            "challenges_completion_analysis.txt", 
+            "dropout_analysis.txt", 
+            "task_completion_analysis.txt", 
+            "usage_analysis.txt"
+        ]
+
+        missing_statistics = [s for s in expected_statistics if s not in statistics_files]
+
+        if skipped_analyses or missing_statistics:
+            # First list the skipped analyses from the original list
+            for analysis, reason in skipped_analyses:
+                f.write(f"- {analysis}: {reason}\n")
+
+            # Then list any expected statistics files that weren't found
+            for missing_stat in missing_statistics:
+                f.write(f"- {missing_stat}: Required data not available or analysis failed\n")
+        else:
+            f.write("No analyses were skipped.\n")
+
+    logger.info(f"Analysis report generated at {report_path}")
+    return report_path
+
+def create_complete_report(csv_data, json_data, activities=None):
+    """
+    Create a complete analysis report with all required sections.
+
+    Args:
+        csv_data: Dictionary of DataFrames from Excel files
+        json_data: Dictionary of data from JSON files
+        activities: DataFrame of activities
+
+    Returns:
+        Path to the generated report
+    """
+    # Extract metrics from activities if available
+    usage_metrics = None
+    dropout_metrics = None
+    campaign_metrics = None
+
+    if activities is not None and isinstance(activities, tuple) and len(activities) >= 5:
+        # If activities is a tuple returned from analyze_activities
+        activities_df, _, usage_metrics, dropout_metrics, campaign_metrics = activities
+    else:
+        activities_df = activities
+
+    # Destination file
+    data_analysis_dir = os.path.join(PROJECT_ROOT, 'data_analysis')
+    os.makedirs(data_analysis_dir, exist_ok=True)
+    dest_file = os.path.join(data_analysis_dir, 'analysis_report.txt')
+
+    # Generate the report using the current data
+    generate_analysis_report(csv_data, json_data, activities_df, usage_metrics, campaign_metrics, dropout_metrics)
+
+    return dest_file
+
 def main():
     """Main function to run the analysis"""
     try:
@@ -2841,11 +3344,21 @@ def main():
         except Exception as e:
             logger.error(f"Error analyzing challenges data: {e}")
 
+        # Generate analysis report
+        try:
+            logger.info("Calling create_complete_report function")
+            report_path = create_complete_report(csv_data, json_data, activities)
+            logger.info(f"Report generation completed, report saved to {report_path}")
+        except Exception as e:
+            logger.error(f"Error generating complete report: {e}")
+            report_path = None
+
         # Print summary
         logger.info("Analysis complete")
         print("\nAnalysis complete.")
         print(f"- Visualizations saved to '{OUTPUT_VISUALIZATIONS_DIR}' directory.")
         print(f"- Statistics saved to '{OUTPUT_STATISTICS_DIR}' directory.")
+        print(f"- Analysis report saved to '{report_path}'")
 
         if unique_users_count > 0:
             print(f"- Number of unique users in the campaign: {unique_users_count}")

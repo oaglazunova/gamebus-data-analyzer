@@ -18,15 +18,27 @@ def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='GameBus Health Behavior Mining Pipeline')
 
+    # Add mutually exclusive group for extract and analyze
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--extract', action='store_true',
+                      help='Only extract all data for all users')
+    group.add_argument('--analyze', action='store_true',
+                      help='Only analyze extracted data')
+
     parser.add_argument('--user-id', type=int, 
                         help='Specific user ID to process')
     parser.add_argument('--log-level', default='INFO',
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         help='Logging level')
-    parser.add_argument('--analyze', action='store_true',
-                        help='Run data analysis after extraction')
 
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    # Set up basic logging to see the parsed arguments
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+    logger.info(f"Parsed arguments: extract={args.extract}, analyze={args.analyze}, user_id={args.user_id}, log_level={args.log_level}")
+
+    return args
 
 def load_users(users_file: str) -> pd.DataFrame:
     """
@@ -38,20 +50,26 @@ def load_users(users_file: str) -> pd.DataFrame:
     Returns:
         DataFrame of users
     """
+    logger = logging.getLogger(__name__)
+    logger.info(f"Loading users from {users_file}")
+
     try:
         df = pd.read_excel(users_file)
+        logger.info(f"Loaded Excel file with columns: {', '.join(df.columns)}")
+
         # Ensure the required columns are present
         if 'email' in df.columns and 'password' in df.columns:
             # Include UserID column if it exists, otherwise just use email and password
             columns_to_keep = ['email', 'password']
             if 'UserID' in df.columns:
                 columns_to_keep.append('UserID')
+            logger.info(f"Using columns: {', '.join(columns_to_keep)}")
             return df[columns_to_keep]
         else:
-            logging.error("Users file must contain 'email' and 'password' columns")
+            logger.error(f"Users file must contain 'email' and 'password' columns. Found columns: {', '.join(df.columns)}")
             raise ValueError("Users file must contain 'email' and 'password' columns")
     except Exception as e:
-        logging.error(f"Failed to load users file: {e}")
+        logger.error(f"Failed to load users file: {e}")
         raise
 
 def run_extraction(user_row: pd.Series) -> Dict[str, List[Dict[str, Any]]]:
@@ -166,11 +184,50 @@ def main():
     logger = setup_logging(log_level=args.log_level)
     logger.info("Starting GameBus Health Behavior Mining Pipeline")
 
-    # Check if we should run extraction
-    # Skip extraction if only analysis is requested (--analyze flag is set and no other extraction-specific flags)
-    run_extraction_step = not args.analyze or args.user_id is not None
+    # Determine which steps to run based on command-line arguments
+    # If --user-id is specified, only run extraction for that user
+    # If neither --extract nor --analyze is specified and no --user-id, run both
+    # If --extract is specified, only run extraction
+    # If --analyze is specified, only run analysis
+    if args.user_id:
+        # When user-id is specified, only run extraction for that user
+        should_run_extraction = True
+        should_run_analysis = False
+        logger.info(f"User ID specified, will only extract data for user {args.user_id}")
+    elif not args.extract and not args.analyze:
+        # No specific flag provided, run both extraction and analysis
+        should_run_extraction = True
+        should_run_analysis = True
+    else:
+        # Specific flag provided, follow the flag
+        should_run_extraction = args.extract
+        should_run_analysis = args.analyze
 
-    if run_extraction_step:
+    logger.info(f"Run extraction: {should_run_extraction}, Run analysis: {should_run_analysis}")
+
+    # If only analysis is being run (--analyze flag is specified), check if data_raw folder exists and contains data
+    if should_run_analysis and not should_run_extraction:
+        import os
+        import glob
+        from config.paths import RAW_DATA_DIR
+
+        # Check if data_raw folder exists
+        if not os.path.exists(RAW_DATA_DIR):
+            logger.error(f"Data directory {RAW_DATA_DIR} does not exist.")
+            print(f"Error: Data directory {RAW_DATA_DIR} does not exist.")
+            print("Please run 'python pipeline.py --extract' to extract data first.")
+            return
+
+        # Check if data_raw folder contains any data files
+        data_files = glob.glob(f'{RAW_DATA_DIR}/*.json')
+        if not data_files:
+            logger.error(f"No data files found in {RAW_DATA_DIR}.")
+            print(f"Error: No data files found in {RAW_DATA_DIR}.")
+            print("Please run 'python pipeline.py --extract' to extract data first.")
+            return
+
+    # Run extraction if needed
+    if should_run_extraction:
         # Load users
         users_df = load_users(USERS_FILE_PATH)
         logger.info(f"Loaded {len(users_df)} users from {USERS_FILE_PATH}")
@@ -225,12 +282,10 @@ def main():
                     progress_pct = (completed / total) * 100
                     logger.info(f"Progress: {progress_pct:.1f}% ({completed}/{total} users)")
 
-        logger.info("Pipeline completed successfully")
-    else:
-        logger.info("Skipping data extraction as only analysis was requested")
+        logger.info("Data extraction completed successfully")
 
-    # Run data analysis if requested
-    if args.analyze:
+    # Run data analysis if needed
+    if should_run_analysis:
         logger.info("Starting data analysis...")
         run_analysis()
         logger.info("Data analysis completed")

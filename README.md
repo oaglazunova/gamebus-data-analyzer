@@ -39,7 +39,6 @@ gamebus-data-analyzer/
 2. **Data Analysis**: Analyze the extracted data to generate insights, including:
    - Activity patterns and distributions
    - User engagement and participation
-   - Challenge types and completion rates
    - Movement types and physical activity metrics
    - Heart rate data and patterns
 
@@ -64,8 +63,8 @@ The following analyses are available in the GameBus Data Analyzer:
 | User Activity Distribution | Shows the number of activities recorded by each user | campaign_data.xlsx (activities sheet) | 'pid' column |
 | Activity Type by User | Shows how different users engage with different activity types | campaign_data.xlsx (activities sheet) | 'pid', 'type' columns |
 | Dropout Rates | Shows the distribution of time between first and last activity for each user | campaign_data.xlsx (activities sheet) | 'createdAt', 'pid' columns |
-| Active vs Passive Usage | Shows the distribution of app usage time between active and passive usage | campaign_data.xlsx (activities sheet), VISIT_APP_PAGE events with DURATION_MS parameter | 'createdAt', 'pid', 'type', 'properties' columns |
-| Usage by Day of Week | Shows active and passive usage by day of week | campaign_data.xlsx (activities sheet), VISIT_APP_PAGE events with DURATION_MS parameter | 'createdAt', 'pid', 'type', 'properties' columns |
+| Active vs Passive Usage | Shows the distribution of app usage time between active and passive usage (Note: This analysis is only performed if VISIT_APP_PAGE events with DURATION_MS parameter are available) | campaign_data.xlsx (activities sheet), VISIT_APP_PAGE events with DURATION_MS parameter | 'createdAt', 'pid', 'type', 'properties' columns |
+| Usage by Day of Week | Shows the number of activities by day of week | campaign_data.xlsx (activities sheet) | 'createdAt', 'date' columns |
 | Activity Heatmap by Time | Shows when users are most active during the week | campaign_data.xlsx (activities sheet) | 'createdAt', 'hour', 'day_of_week' columns |
 | Activity Types Over Time | Shows how different types of activities contribute to overall engagement | campaign_data.xlsx (activities sheet) | 'date', 'type' columns |
 | User Engagement Heatmap | Shows the engagement patterns of different users over time | campaign_data.xlsx (activities sheet) | 'pid', 'date' columns |
@@ -88,15 +87,16 @@ The following analyses are available in the GameBus Data Analyzer:
 
 | Analysis | Description | Data Source | Game Descriptors/Parameters |
 |----------|-------------|-------------|---------------------------|
-| Challenge Types Distribution | Shows the frequency of different challenge types | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'type' column |
-| Challenge Points Distribution | Shows the distribution of points awarded for challenges | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'points' column |
-| Points by Challenge Type | Shows the distribution of points for each challenge type | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'type', 'points' columns |
-| Challenge Difficulty Distribution | Shows the distribution of challenge difficulties | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'difficulty' column |
-| Points by Difficulty | Shows the relationship between difficulty and points | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'difficulty', 'points' columns |
-| Challenge Completion Rate | Shows the distribution of challenge completion rates | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'completion_rate' column |
-| Completion Rate by Challenge Type | Shows the completion rate for each challenge type | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'type', 'completion_rate' columns |
-| Challenge Completion Status by Type | Shows the proportion of completed vs. incomplete challenges by type | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'type', 'completion_rate' columns |
-| Challenge Completion Heatmap | Shows challenge completion rates by type and difficulty | campaign_data.xlsx (challenges sheet) or campaign_desc.xlsx (challenges sheet) | 'type', 'difficulty', 'completion_rate' columns |
+| Challenge Levels Distribution | Shows the distribution of challenges by level | campaign_desc.xlsx (challenges sheet) | 'level', 'is_initial_level', 'success_next' columns |
+| Challenge Types Distribution | Shows the frequency of different challenge types | campaign_desc.xlsx (challenges sheet) | 'type' column |
+| Challenge Completions | Shows the number of completions for each challenge | campaign_data.xlsx (activities sheet) | SCORE_GAMEBUS_POINTS with FOR_CHALLENGE parameter |
+| Challenge Completions Over Time | Shows how challenge completions are distributed over time | campaign_data.xlsx (activities sheet) | SCORE_GAMEBUS_POINTS with FOR_CHALLENGE parameter, 'createdAt' column |
+| Challenges Ranked by Points | Shows challenges ranked by the total points earned | campaign_data.xlsx (activities sheet) | SCORE_GAMEBUS_POINTS with FOR_CHALLENGE, NUMBER_OF_POINTS parameters |
+| Challenges Ranked by Users | Shows challenges ranked by the number of users completing them | campaign_data.xlsx (activities sheet) | SCORE_GAMEBUS_POINTS with FOR_CHALLENGE parameter, 'pid' column |
+| User Challenge Points Heatmap | Shows a heatmap of points earned by users for each challenge | campaign_data.xlsx (activities sheet) | SCORE_GAMEBUS_POINTS with FOR_CHALLENGE, NUMBER_OF_POINTS parameters, 'pid' column |
+| Task Completion Frequency | Shows the frequency of task completions over time | campaign_data.xlsx (activities sheet) | SCORE_GAMEBUS_POINTS with FOR_CHALLENGE parameter, 'createdAt' column |
+| Daily Task Completion | Shows the number of tasks completed per day | campaign_data.xlsx (activities sheet) | SCORE_GAMEBUS_POINTS with FOR_CHALLENGE parameter, 'createdAt' column |
+
 
 ## Complete Setup Guide
 
@@ -170,7 +170,7 @@ Creating a virtual environment keeps your project dependencies separate from oth
 2. **Prepare user data**:
    - Create an Excel file with user credentials
    - The file must have columns named `email` and `password` (both lowercase)
-   - Optionally include a `UserID` column if you want to process specific users
+   - Optionally include a `UserID` column for reference (not used for filtering)
    - Save this file as `users.xlsx` in the `config/` directory
 
 3. **For data analysis**:
@@ -179,9 +179,9 @@ Creating a virtual environment keeps your project dependencies separate from oth
 
 Example of `users.xlsx` format:
 ```
-email               | password      | 
----------------------|--------------|-------
-user@example.com     | password123  | 
+email               | password      | UserID (optional)
+---------------------|--------------|----------------
+user@example.com     | password123  | 12345
 ```
 
 ### Step 6: Running the Script
@@ -193,27 +193,22 @@ With your virtual environment activated, you can run the script using various co
    python pipeline.py
    ```
 
-2. **Process a specific user** (only extracts data for a specific user, does not run analysis):
-   ```
-   python pipeline.py --user-id 12345
-   ```
-
-3. **Only extract data** (extracts all data for all users without running analysis):
+2. **Only extract data** (extracts all data for all users without running analysis):
    ```
    python pipeline.py --extract
    ```
 
-4. **Only run data analysis** on existing data (without extracting new data):
+3. **Only run data analysis** on existing data (without extracting new data):
    ```
    python pipeline.py --analyze
    ```
 
-5. **Change logging level** (for more or less detailed output):
+4. **Change logging level** (for more or less detailed output):
    ```
    python pipeline.py --log-level DEBUG
    ```
 
-6. **Generate test data** (creates synthetic test data for development and testing):
+5. **Generate test data** (creates synthetic test data for development and testing):
    ```
    python src\scripts\generate_test_data.py
    ```

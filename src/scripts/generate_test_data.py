@@ -5,23 +5,22 @@ import datetime
 import sys
 from typing import Dict, List, Any, Tuple
 import string
+import pandas as pd
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 # Import the list of valid game descriptors and their parameters
 from config.settings import VALID_GAME_DESCRIPTORS
-from config.paths import RAW_DATA_DIR
+from config.paths import RAW_DATA_DIR, USERS_FILE_PATH, CONFIG_DIR
 from config.property_schemes import ACTIVITY_TO_PROPERTIES, PROPERTY_DETAILS
 
 # Ensure the data directory exists
 os.makedirs(RAW_DATA_DIR, exist_ok=True)
 
-# Number of users to generate data for
-NUM_USERS = 10
-
-# Number of data points per game descriptor
-NUM_DATA_POINTS = 5
+# Constants
+DEFAULT_NUM_USERS = 10  # Default number of users if users.xlsx is not found
+NUM_DATA_POINTS = 5     # Number of data points to generate for each game descriptor
 
 def load_property_schemes() -> Tuple[Dict[str, List[str]], Dict[str, Dict[str, Any]]]:
     """
@@ -300,8 +299,83 @@ def generate_data_for_game_descriptor(game_descriptor: str, params_comment: str,
 def main():
     """
     Generate test data for multiple users with all game descriptors and their parameters.
+    If users.xlsx exists in the config directory, it will be used to get user information (email, password, ID).
+    The script will generate test data for each user in the Excel file.
+    If the Excel file doesn't exist or doesn't contain the required columns, default user IDs will be used.
+    For filenames, user IDs are extracted from campaign_data.xlsx, column pid.
     """
-    print(f"Generating test data for {NUM_USERS} users...")
+    # Define the path to campaign_data.xlsx
+    campaign_data_path = os.path.join(CONFIG_DIR, 'campaign_data.xlsx')
+
+    # Extract unique user IDs from campaign_data.xlsx, column pid
+    campaign_user_ids = []
+    if os.path.exists(campaign_data_path):
+        try:
+            # Try to read the 'activities' sheet from campaign_data.xlsx
+            xl = pd.ExcelFile(campaign_data_path)
+            if 'activities' in xl.sheet_names:
+                activities_df = pd.read_excel(campaign_data_path, sheet_name='activities')
+                if 'pid' in activities_df.columns:
+                    # Extract unique user IDs from the 'pid' column
+                    campaign_user_ids = activities_df['pid'].unique().tolist()
+                    print(f"Extracted {len(campaign_user_ids)} unique user IDs from campaign_data.xlsx, column pid")
+                else:
+                    print(f"Column 'pid' not found in the 'activities' sheet of {campaign_data_path}")
+            else:
+                print(f"Sheet 'activities' not found in {campaign_data_path}")
+        except Exception as e:
+            print(f"Error reading {campaign_data_path}: {e}")
+    else:
+        print(f"{campaign_data_path} not found")
+
+    # Check if users.xlsx exists
+    users = []
+    user_ids = []
+
+    if os.path.exists(USERS_FILE_PATH):
+        try:
+            # Read user data from Excel file
+            df = pd.read_excel(USERS_FILE_PATH)
+
+            # Check if required columns exist
+            required_columns = ['email', 'password']
+            if all(col in df.columns for col in required_columns):
+                # Create a list of user dictionaries with all available information
+                for _, row in df.iterrows():
+                    user = {
+                        'email': row['email'],
+                        'password': row['password']
+                    }
+
+                    # Add UserID if available (could be 'UserID', 'id', or 'user_id')
+                    if 'UserID' in df.columns:
+                        user['id'] = row['UserID']
+                    elif 'id' in df.columns:
+                        user['id'] = row['id']
+                    elif 'user_id' in df.columns:
+                        user['id'] = row['user_id']
+                    else:
+                        # Generate a default ID if none is provided
+                        user['id'] = len(users) + 1
+
+                    users.append(user)
+                    user_ids.append(user['id'])
+
+                print(f"Found {len(users)} users in {USERS_FILE_PATH}")
+            else:
+                missing_columns = [col for col in required_columns if col not in df.columns]
+                print(f"Missing required columns in {USERS_FILE_PATH}: {missing_columns}")
+                print(f"Using default user IDs")
+                user_ids = list(range(1, DEFAULT_NUM_USERS + 1))
+        except Exception as e:
+            print(f"Error reading {USERS_FILE_PATH}: {e}")
+            print(f"Using default user IDs")
+            user_ids = list(range(1, DEFAULT_NUM_USERS + 1))
+    else:
+        print(f"{USERS_FILE_PATH} not found, using default user IDs")
+        user_ids = list(range(1, DEFAULT_NUM_USERS + 1))
+
+    print(f"Generating test data for {len(user_ids)} users...")
 
     # Load property schemes from the config file
     activity_to_properties, property_details = load_property_schemes()
@@ -379,9 +453,13 @@ def main():
 
     print(f"Defined parameters for {len(game_descriptor_params)} game descriptors")
 
-    # Generate data for each user
-    for user_id in range(1, NUM_USERS + 1):
-        print(f"Generating data for user {user_id}...")
+    # Use campaign user IDs for filenames if available
+    filename_user_ids = campaign_user_ids if campaign_user_ids else user_ids
+    print(f"Using {len(filename_user_ids)} unique user IDs from campaign_data.xlsx for filenames")
+
+    # Generate data for each filename user ID
+    for filename_user_id in filename_user_ids:
+        print(f"Generating data for user ID {filename_user_id}...")
 
         # Dictionary to store all data for this user
         user_data = {}
@@ -397,22 +475,13 @@ def main():
             user_data[game_descriptor.lower()] = data_points
 
             # Save the data points to a separate file
-            file_name = f"user_{user_id}_{game_descriptor.lower()}.json"
+            file_name = f"user_{filename_user_id}_{game_descriptor.lower()}.json"
             file_path = os.path.join(RAW_DATA_DIR, file_name)
 
             with open(file_path, 'w') as json_file:
                 json.dump(data_points, json_file, indent=4)
 
             print(f"  Saved {len(data_points)} data points to {file_path}")
-
-        # Save all data for this user to a single file
-        all_data_file_name = f"user_{user_id}_all_data.json"
-        all_data_file_path = os.path.join(RAW_DATA_DIR, all_data_file_name)
-
-        with open(all_data_file_path, 'w') as json_file:
-            json.dump(user_data, json_file, indent=4)
-
-        print(f"Saved all data for user {user_id} to {all_data_file_path}")
 
     print("Data generation complete!")
 

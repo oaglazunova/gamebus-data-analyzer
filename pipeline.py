@@ -25,8 +25,6 @@ def parse_args():
     group.add_argument('--analyze', action='store_true',
                       help='Only analyze extracted data')
 
-    parser.add_argument('--user-id', type=int, 
-                        help='Specific user ID to process')
     parser.add_argument('--log-level', default='INFO',
                         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                         help='Logging level')
@@ -36,7 +34,7 @@ def parse_args():
     # Set up basic logging to see the parsed arguments
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
-    logger.info(f"Parsed arguments: extract={args.extract}, analyze={args.analyze}, user_id={args.user_id}, log_level={args.log_level}")
+    logger.info(f"Parsed arguments: extract={args.extract}, analyze={args.analyze}, log_level={args.log_level}")
 
     return args
 
@@ -185,16 +183,10 @@ def main():
     logger.info("Starting GameBus Health Behavior Mining Pipeline")
 
     # Determine which steps to run based on command-line arguments
-    # If --user-id is specified, only run extraction for that user
-    # If neither --extract nor --analyze is specified and no --user-id, run both
+    # If neither --extract nor --analyze is specified, run both
     # If --extract is specified, only run extraction
     # If --analyze is specified, only run analysis
-    if args.user_id:
-        # When user-id is specified, only run extraction for that user
-        should_run_extraction = True
-        should_run_analysis = False
-        logger.info(f"User ID specified, will only extract data for user {args.user_id}")
-    elif not args.extract and not args.analyze:
+    if not args.extract and not args.analyze:
         # No specific flag provided, run both extraction and analysis
         should_run_extraction = True
         should_run_analysis = True
@@ -232,55 +224,38 @@ def main():
         users_df = load_users(USERS_FILE_PATH)
         logger.info(f"Loaded {len(users_df)} users from {USERS_FILE_PATH}")
 
-        # Process specific user or all users
-        if args.user_id:
-            # Check if UserID column exists in the DataFrame
-            if 'UserID' in users_df.columns:
-                # Filter by UserID
-                matching_users = users_df[users_df['UserID'] == args.user_id]
-                if not matching_users.empty:
-                    user_row = matching_users.iloc[0]
-                    results = run_extraction(user_row)
-                else:
-                    logger.error(f"No user found with UserID {args.user_id}")
-                    return
-            else:
-                # If UserID column doesn't exist, we can't filter by it
-                logger.error("UserID column not found in users file. Cannot filter by user ID.")
-                logger.info("Available columns: " + ", ".join(users_df.columns))
-                return
-        else:
-            all_results = {}
+        # Process all users
+        all_results = {}
 
-            # Use a thread pool to process users in parallel
-            max_workers = min(10, len(users_df))  # Limit the number of concurrent workers
-            logger.info(f"Using {max_workers} workers for parallel processing")
+        # Use a thread pool to process users in parallel
+        max_workers = min(10, len(users_df))  # Limit the number of concurrent workers
+        logger.info(f"Using {max_workers} workers for parallel processing")
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # Submit all tasks
-                future_to_user = {
-                    executor.submit(run_extraction, user_row): user_row['email']
-                    for _, user_row in users_df.iterrows()
-                }
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all tasks
+            future_to_user = {
+                executor.submit(run_extraction, user_row): user_row['email']
+                for _, user_row in users_df.iterrows()
+            }
 
-                # Process results as they complete
-                completed = 0
-                total = len(future_to_user)
+            # Process results as they complete
+            completed = 0
+            total = len(future_to_user)
 
-                for future in concurrent.futures.as_completed(future_to_user):
-                    user_email = future_to_user[future]
-                    completed += 1
+            for future in concurrent.futures.as_completed(future_to_user):
+                user_email = future_to_user[future]
+                completed += 1
 
-                    try:
-                        user_results = future.result()
-                        all_results[user_email] = user_results
-                        logger.info(f"Completed user {completed}/{total}: {user_email}")
-                    except Exception as e:
-                        logger.error(f"Error processing user {user_email}: {e}")
+                try:
+                    user_results = future.result()
+                    all_results[user_email] = user_results
+                    logger.info(f"Completed user {completed}/{total}: {user_email}")
+                except Exception as e:
+                    logger.error(f"Error processing user {user_email}: {e}")
 
-                    # Report progress
-                    progress_pct = (completed / total) * 100
-                    logger.info(f"Progress: {progress_pct:.1f}% ({completed}/{total} users)")
+                # Report progress
+                progress_pct = (completed / total) * 100
+                logger.info(f"Progress: {progress_pct:.1f}% ({completed}/{total} users)")
 
         logger.info("Data extraction completed successfully")
 

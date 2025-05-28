@@ -4,6 +4,7 @@ Data collectors for extracting user data from the GameBus API.
 import json
 import os
 import logging
+import datetime
 from typing import Dict, List, Tuple, Any, Optional
 
 from config.paths import RAW_DATA_DIR
@@ -56,6 +57,7 @@ class AllDataCollector:
         results = {}
         file_paths = []
         all_raw_responses = []  # Store all raw responses here to avoid duplicate API calls
+        all_metadata = {}  # Store all metadata with X_ prefix
 
         # Create directory if it doesn't exist
         os.makedirs(RAW_DATA_DIR, exist_ok=True)
@@ -97,6 +99,11 @@ class AllDataCollector:
                     # Store results using the actual game descriptor to ensure correct parameters
                     results[actual_game_descriptor.lower()] = parsed_data
 
+                    # Extract metadata with X_ prefix for separate files
+                    metadata = self.extract_metadata(parsed_data, actual_game_descriptor.lower())
+                    if metadata:
+                        all_metadata[actual_game_descriptor.lower()] = metadata
+
                     if file_path:
                         file_paths.append(file_path)
                         logger.info(f"Collected {len(parsed_data)} {data_type} data points (game descriptor: {actual_game_descriptor}), saved to {file_path}")
@@ -108,24 +115,15 @@ class AllDataCollector:
                 logger.error(f"Failed to collect {data_type} data for user {self.user_id}: {e}")
                 logger.exception(e)  # Log the full exception traceback
 
-        # Save all data to a single file
+        # No longer saving all data to a single file as per requirements
         if results:
-            all_data_file_name = f"user_{self.user_id}_all_data.json"
-            all_data_file_path = os.path.join(RAW_DATA_DIR, all_data_file_name)
-
-            try:
-                # Save parsed data
-                with open(all_data_file_path, 'w') as json_file:
-                    json.dump(results, json_file, indent=4)
-
-                file_paths.append(all_data_file_path)
-                logger.info(f"Saved all parsed data to {all_data_file_path}")
-
-            except Exception as e:
-                logger.error(f"Failed to save all data to file: {e}")
-                logger.exception(e)  # Log the full exception traceback
+            logger.info("Skipping creation of all_data.json file as per requirements")
         else:
             logger.warning(f"No data collected for user {self.user_id}")
+
+        # Metadata extraction is still performed, but files are not saved as per requirements
+        if all_metadata:
+            logger.info(f"Extracted metadata for {len(all_metadata)} data types, but not saving to files as per requirements")
 
         # Save all raw responses to a single file
         if all_raw_responses:
@@ -187,6 +185,100 @@ class AllDataCollector:
 
             # For all data types
             data = {}
+
+            # Extract metadata with X_ prefix
+            # Include the date field from the raw data if available
+            if "date" in data_point:
+                timestamp_ms = data_point.get("date")
+                # Convert timestamp from milliseconds to a readable date format
+                if timestamp_ms:
+                    try:
+                        # Convert milliseconds to seconds
+                        timestamp_sec = timestamp_ms / 1000
+                        # Convert to datetime
+                        date_time = datetime.datetime.fromtimestamp(timestamp_sec)
+                        # Format as string
+                        formatted_date = date_time.strftime("%Y-%m-%d %H:%M:%S")
+                        data["X_DATE"] = formatted_date
+                        logger.debug(f"Added formatted date field: {formatted_date} (from timestamp: {timestamp_ms})")
+                    except Exception as e:
+                        # If conversion fails, use the original timestamp
+                        data["X_DATE"] = timestamp_ms
+                        logger.warning(f"Failed to convert timestamp {timestamp_ms} to readable format: {e}")
+                else:
+                    data["X_DATE"] = timestamp_ms
+                    logger.debug(f"Added date field: {timestamp_ms}")
+
+            # Extract additional metadata with X_ prefix
+            if "id" in data_point:
+                data["X_ACTIVITY_ID"] = data_point.get("id")
+                logger.debug(f"Added activity ID field: {data_point.get('id')}")
+
+            # Extract game descriptor information
+            if "gameDescriptor" in data_point and isinstance(data_point.get("gameDescriptor"), dict):
+                game_descriptor_data = data_point.get("gameDescriptor", {})
+                if "translationKey" in game_descriptor_data:
+                    data["X_GAME_DESCRIPTOR"] = game_descriptor_data.get("translationKey")
+                    logger.debug(f"Added game descriptor field: {game_descriptor_data.get('translationKey')}")
+                if "id" in game_descriptor_data:
+                    data["X_GAME_DESCRIPTOR_ID"] = game_descriptor_data.get("id")
+                    logger.debug(f"Added game descriptor ID field: {game_descriptor_data.get('id')}")
+
+            # Extract player information
+            if "player" in data_point and isinstance(data_point.get("player"), dict):
+                player_data = data_point.get("player", {})
+                if "name" in player_data:
+                    data["X_PLAYER_NAME"] = player_data.get("name")
+                    logger.debug(f"Added player name field: {player_data.get('name')}")
+                if "id" in player_data:
+                    data["X_PLAYER_ID"] = player_data.get("id")
+                    logger.debug(f"Added player ID field: {player_data.get('id')}")
+
+            # Extract timestamps if available
+            if "createdAt" in data_point:
+                timestamp_ms = data_point.get("createdAt")
+                if timestamp_ms:
+                    try:
+                        timestamp_sec = timestamp_ms / 1000
+                        date_time = datetime.datetime.fromtimestamp(timestamp_sec)
+                        formatted_date = date_time.strftime("%Y-%m-%d %H:%M:%S")
+                        data["X_CREATED_AT"] = formatted_date
+                        logger.debug(f"Added created at field: {formatted_date}")
+                    except Exception as e:
+                        data["X_CREATED_AT"] = timestamp_ms
+                        logger.warning(f"Failed to convert created at timestamp {timestamp_ms} to readable format: {e}")
+
+            if "updatedAt" in data_point:
+                timestamp_ms = data_point.get("updatedAt")
+                if timestamp_ms:
+                    try:
+                        timestamp_sec = timestamp_ms / 1000
+                        date_time = datetime.datetime.fromtimestamp(timestamp_sec)
+                        formatted_date = date_time.strftime("%Y-%m-%d %H:%M:%S")
+                        data["X_UPDATED_AT"] = formatted_date
+                        logger.debug(f"Added updated at field: {formatted_date}")
+                    except Exception as e:
+                        data["X_UPDATED_AT"] = timestamp_ms
+                        logger.warning(f"Failed to convert updated at timestamp {timestamp_ms} to readable format: {e}")
+
+            # Extract location data if available
+            if "latitude" in data_point and "longitude" in data_point:
+                data["X_LATITUDE"] = data_point.get("latitude")
+                data["X_LONGITUDE"] = data_point.get("longitude")
+                logger.debug(f"Added location fields: lat={data_point.get('latitude')}, lon={data_point.get('longitude')}")
+
+            # Extract property keys
+            if "propertyInstances" in data_point and isinstance(data_point.get("propertyInstances"), list):
+                property_keys = []
+                for prop_instance in data_point.get("propertyInstances", []):
+                    if "property" in prop_instance and isinstance(prop_instance.get("property"), dict):
+                        prop_data = prop_instance.get("property", {})
+                        if "translationKey" in prop_data:
+                            property_keys.append(prop_data.get("translationKey"))
+                if property_keys:
+                    data["X_PROPERTY_KEYS"] = property_keys
+                    logger.debug(f"Added property keys field: {property_keys}")
+
             for property_instance in data_point.get("propertyInstances", []):
                 prop_key = property_instance.get("property", {}).get("translationKey")
                 property_value = property_instance.get("value")
@@ -244,6 +336,30 @@ class AllDataCollector:
             logger.error(f"Failed to save raw JSON responses for {data_type} to file: {e}")
             return ""
 
+    def extract_metadata(self, data: List[Dict[str, Any]], data_type: str) -> List[Dict[str, Any]]:
+        """
+        Extract metadata with X_ prefix from parsed data.
+
+        Args:
+            data: Parsed data
+            data_type: Type of data
+
+        Returns:
+            List of metadata dictionaries
+        """
+        metadata_list = []
+
+        for item in data:
+            # Extract all fields with X_ prefix
+            metadata = {k: v for k, v in item.items() if k.startswith("X_")}
+
+            if metadata:
+                metadata_list.append(metadata)
+                logger.debug(f"Extracted metadata with keys: {list(metadata.keys())}")
+
+        logger.info(f"Extracted {len(metadata_list)} metadata items for {data_type}")
+        return metadata_list
+
     def save_data(self, data: List[Dict[str, Any]], data_type: str) -> str:
         """
         Save data to a JSON file.
@@ -264,12 +380,21 @@ class AllDataCollector:
         json_file_name = f"user_{self.user_id}_{data_type}.json"
         json_file_path = os.path.join(RAW_DATA_DIR, json_file_name)
 
-        # Save data to JSON file
+        # Fields to exclude from JSON files
+        excluded_fields = ["X_GAME_DESCRIPTOR", "X_GAME_DESCRIPTOR_ID", "X_PLAYER_ID", "X_PROPERTY_KEYS"]
+
+        # Filter out excluded fields from each data point
+        filtered_data = []
+        for item in data:
+            filtered_item = {k: v for k, v in item.items() if k not in excluded_fields}
+            filtered_data.append(filtered_item)
+
+        # Save filtered data to JSON file
         try:
             with open(json_file_path, 'w') as json_file:
-                json.dump(data, json_file, indent=4)
+                json.dump(filtered_data, json_file, indent=4)
 
-            logger.info(f"Saved {len(data)} {data_type} data points to {json_file_path}")
+            logger.info(f"Saved {len(filtered_data)} {data_type} data points to {json_file_path}")
             return json_file_path
         except Exception as e:
             logger.error(f"Failed to save data to file: {e}")

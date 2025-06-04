@@ -178,8 +178,8 @@ def main():
     """Main function to run the pipeline."""
     args = parse_args()
 
-    # Set up logging
-    logger = setup_logging(log_level=args.log_level)
+    # Set up logging for extraction
+    logger = setup_logging(log_level=args.log_level, log_type="extraction")
     logger.info("Starting GameBus Health Behavior Mining Pipeline")
 
     # Determine which steps to run based on command-line arguments
@@ -231,33 +231,64 @@ def main():
         max_workers = min(10, len(users_df))  # Limit the number of concurrent workers
         logger.info(f"Using {max_workers} workers for parallel processing")
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all tasks
-            future_to_user = {
-                executor.submit(run_extraction, user_row): user_row['email']
-                for _, user_row in users_df.iterrows()
-            }
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all tasks
+                future_to_user = {
+                    executor.submit(run_extraction, user_row): user_row['email']
+                    for _, user_row in users_df.iterrows()
+                }
 
-            # Process results as they complete
-            completed = 0
-            total = len(future_to_user)
-
-            for future in concurrent.futures.as_completed(future_to_user):
-                user_email = future_to_user[future]
-                completed += 1
+                # Process results as they complete
+                completed = 0
+                total = len(future_to_user)
 
                 try:
-                    user_results = future.result()
-                    all_results[user_email] = user_results
-                    logger.info(f"Completed user {completed}/{total}: {user_email}")
-                except Exception as e:
-                    logger.error(f"Error processing user {user_email}: {e}")
+                    for future in concurrent.futures.as_completed(future_to_user):
+                        user_email = future_to_user[future]
+                        completed += 1
 
-                # Report progress
-                progress_pct = (completed / total) * 100
-                logger.info(f"Progress: {progress_pct:.1f}% ({completed}/{total} users)")
+                        try:
+                            user_results = future.result()
+                            all_results[user_email] = user_results
+                            logger.info(f"Completed user {completed}/{total}: {user_email}")
+                        except Exception as e:
+                            logger.error(f"Error processing user {user_email}: {e}")
 
-        logger.info("Data extraction completed successfully")
+                        # Report progress
+                        progress_pct = (completed / total) * 100
+                        logger.info(f"Progress: {progress_pct:.1f}% ({completed}/{total} users)")
+                except KeyboardInterrupt:
+                    logger.warning("KeyboardInterrupt received. Cancelling pending tasks...")
+                    # Cancel all pending futures
+                    for future in future_to_user:
+                        if not future.done():
+                            future.cancel()
+                    # Wait for the remaining tasks to complete
+                    logger.warning("Waiting for running tasks to complete...")
+                    # We don't wait for futures here to allow immediate interruption
+                    raise  # Re-raise to be caught by the outer try-except
+
+            # Check if any data was actually extracted
+            data_extracted = False
+            for user_email, user_results in all_results.items():
+                if user_results:  # Check if user_results is not empty
+                    data_extracted = True
+                    break
+
+            if data_extracted:
+                logger.info("Data extraction completed successfully")
+            else:
+                logger.warning("Data extraction completed, but no data was extracted for any user")
+                print("Warning: Data extraction completed, but no data was extracted for any user")
+        except KeyboardInterrupt:
+            logger.warning("Data extraction interrupted by user. Partial results may have been saved.")
+            print("\nData extraction interrupted by user. Partial results may have been saved.")
+            # Continue with analysis if requested, using partial results
+            if should_run_analysis:
+                logger.info("Continuing with analysis using partial results...")
+            else:
+                return
 
     # Run data analysis if needed
     if should_run_analysis:
@@ -266,4 +297,8 @@ def main():
         logger.info("Data analysis completed")
 
 if __name__ == "__main__":
-    main() 
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nProgram interrupted by user. Exiting gracefully...")
+        logging.getLogger(__name__).warning("Program interrupted by user. Exiting gracefully...")

@@ -57,15 +57,29 @@ from config.paths import PROJECT_ROOT
 logs_dir = os.path.join(PROJECT_ROOT, "logs")
 os.makedirs(logs_dir, exist_ok=True)
 
-logging.basicConfig(
-	level=logging.INFO,
-	format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-	handlers=[
-		logging.StreamHandler(),
-		logging.FileHandler(os.path.join(logs_dir, 'data_analysis.log'))
-	]
-)
+# Configure logger for data analysis only
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# Clear any existing handlers to avoid duplicate logs
+if logger.hasHandlers():
+    logger.handlers.clear()
+
+# Create formatter
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+# Add console handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
+
+# Add file handler for analysis logs
+file_handler = logging.FileHandler(os.path.join(logs_dir, 'data_analysis.log'))
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
+# Prevent propagation to root logger to avoid duplicate logs
+logger.propagate = False
 
 # Set style for plots
 plt.style.use('ggplot')

@@ -187,15 +187,17 @@ class GameBusClient:
         logger.info(f"Total data points fetched: {len(all_data)}")
         return all_data, raw_responses
 
-    def get_user_id(self, token: str) -> Optional[int]:
+    def get_user_id(self, token: str) -> Tuple[Optional[int], Optional[str]]:
         """
-        Get the user ID using the access token.
+        Get the user ID and email using the access token.
 
         Args:
             token: Access token
 
         Returns:
-            User ID or None if retrieval failed
+            Tuple containing:
+            - User ID or None if retrieval failed
+            - User email or None if not available
         """
         headers = {
             "Authorization": f"Bearer {token}"
@@ -206,11 +208,12 @@ class GameBusClient:
             response.raise_for_status()
             user_data = response.json()
             user_id = user_data.get("player", {}).get("id")
-            logger.info("User ID fetched successfully")
-            return user_id
+            user_email = user_data.get("email")
+            logger.info("User ID and email fetched successfully")
+            return user_id, user_email
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to get user ID: {e}")
-            return None
+            logger.error(f"Failed to get user ID and email: {e}")
+            return None, None
 
     def get_user_data(self, token: str, user_id: int, game_descriptor: str, 
                        page_size: int = DEFAULT_PAGE_SIZE, try_all_descriptors: bool = False) -> tuple[List[Dict[str, Any]], str, List[str]]:
@@ -252,10 +255,6 @@ class GameBusClient:
 
         # Standard URL format with gds parameter
         urls_to_try.append((self.activities_url + "&gds={}").format(user_id, game_descriptor))
-
-        # Special case for SELFREPORT
-        if game_descriptor == "SELFREPORT":
-            urls_to_try = [(self.activities_url + "&excludedGds=").format(user_id)] + urls_to_try
 
         # Try without any game descriptor filter
         urls_to_try.append(self.activities_url.format(user_id))

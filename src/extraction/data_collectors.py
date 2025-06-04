@@ -17,7 +17,7 @@ class AllDataCollector:
     """
     Collector for all types of data.
     """
-    def __init__(self, client, token: str, user_id: int):
+    def __init__(self, client, token: str, user_id: int, user_email: Optional[str] = None):
         """
         Initialize the all data collector.
 
@@ -25,10 +25,12 @@ class AllDataCollector:
             client: GameBusClient instance
             token: User access token
             user_id: User ID
+            user_email: User email (optional)
         """
         self.client = client
         self.token = token
         self.user_id = user_id
+        self.user_email = user_email
 
         # Define the data type configurations
         self.data_configs = {}
@@ -61,6 +63,11 @@ class AllDataCollector:
 
         # Create directory if it doesn't exist
         os.makedirs(RAW_DATA_DIR, exist_ok=True)
+
+        # Create user ID to email mapping file
+        mapping_file_path = self.create_user_email_mapping()
+        if mapping_file_path:
+            file_paths.append(mapping_file_path)
 
         # Try to collect data for each data type
         for data_type, config in self.data_configs.items():
@@ -359,6 +366,46 @@ class AllDataCollector:
 
         logger.info(f"Extracted {len(metadata_list)} metadata items for {data_type}")
         return metadata_list
+
+    def create_user_email_mapping(self) -> str:
+        """
+        Create a txt file mapping user ID to email.
+
+        Returns:
+            Path to the created txt file or empty string if creation failed
+        """
+        # Don't create file if email is not available
+        if not self.user_email:
+            logger.warning(f"No email available for user {self.user_id}, skipping user-email mapping file creation")
+            return ""
+
+        # Create file path
+        mapping_file_name = f"user_email_mapping.txt"
+        mapping_file_path = os.path.join(RAW_DATA_DIR, mapping_file_name)
+
+        try:
+            # Check if file exists and read existing mappings
+            mappings = {}
+            if os.path.exists(mapping_file_path):
+                with open(mapping_file_path, 'r') as mapping_file:
+                    for line in mapping_file:
+                        if ':' in line:
+                            uid, email = line.strip().split(':', 1)
+                            mappings[uid.strip()] = email.strip()
+
+            # Add or update current user mapping
+            mappings[str(self.user_id)] = self.user_email
+
+            # Write all mappings to file
+            with open(mapping_file_path, 'w') as mapping_file:
+                for uid, email in mappings.items():
+                    mapping_file.write(f"{uid}: {email}\n")
+
+            logger.info(f"Saved user ID to email mapping for user {self.user_id} to {mapping_file_path}")
+            return mapping_file_path
+        except Exception as e:
+            logger.error(f"Failed to save user ID to email mapping: {e}")
+            return ""
 
     def save_data(self, data: List[Dict[str, Any]], data_type: str) -> str:
         """

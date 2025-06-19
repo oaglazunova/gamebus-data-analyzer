@@ -51,17 +51,124 @@ class GameBusClient:
         headers = {
             "Authorization": f"Basic {self.authcode}",
             "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": "https://base.healthyw8.gamebus.eu",
+            "Referer": "https://base.healthyw8.gamebus.eu/",
+            "Accept": "application/json, text/plain, */*"
         }
 
+        # Add retry logic with exponential backoff
+        retry_count = 0
+        max_retries = MAX_RETRIES
+        start_time = time.time()
+        max_time = 60  # Maximum time in seconds for the token retrieval process
+
+        while retry_count < max_retries and (time.time() - start_time) < max_time:
+            try:
+                # Make OPTIONS request first to mimic browser behavior
+                # For token endpoint, we need to use POST in the OPTIONS request
+                try:
+                    base_url = self.token_url.split('?')[0]
+                    logger.info(f"Making OPTIONS request to token URL: {base_url}")
+
+                    options_headers = {
+                        "Access-Control-Request-Method": "POST",
+                        "Access-Control-Request-Headers": "authorization,content-type",
+                        "Origin": "https://base.healthyw8.gamebus.eu",
+                        "Referer": "https://base.healthyw8.gamebus.eu/"
+                    }
+
+                    options_response = requests.options(base_url, headers=options_headers, timeout=REQUEST_TIMEOUT)
+                    logger.info(f"OPTIONS response status for token URL: {options_response.status_code}")
+                except requests.exceptions.RequestException as e:
+                    logger.warning(f"OPTIONS request for token URL failed, continuing anyway: {e}")
+
+                logger.info(f"Requesting token, attempt {retry_count + 1}/{max_retries}")
+                response = requests.post(self.token_url, headers=headers, data=payload, timeout=REQUEST_TIMEOUT)
+                response.raise_for_status()
+                token = response.json().get("access_token")
+                logger.info("Token fetched successfully")
+                return token
+            except requests.exceptions.RequestException as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    logger.warning(f"Failed to get user token, attempt {retry_count}/{max_retries}: {e}")
+
+                    # Determine sleep time based on error type
+                    if hasattr(e, 'response') and e.response is not None:
+                        if e.response.status_code == 429:
+                            # Rate limiting - use longer backoff
+                            sleep_time = min(5 ** retry_count + (0.5 * random.random()), 60)
+                            logger.warning(f"Rate limit exceeded. Waiting for {sleep_time:.2f} seconds before retrying.")
+                        elif e.response.status_code >= 500:
+                            # Server error (5xx) - use longer backoff times
+                            sleep_time = min(10 ** retry_count + (1.0 * random.random()), 120)
+                            logger.warning(f"Server error (status code: {e.response.status_code}). Waiting for {sleep_time:.2f} seconds before retrying.")
+                            # Log more details about the error
+                            logger.error(f"Server error details: {e}")
+                            if hasattr(e.response, 'text'):
+                                logger.error(f"Response content: {e.response.text[:1000]}...")
+                        else:
+                            # Standard exponential backoff for other errors
+                            sleep_time = min(2 ** retry_count + (0.1 * random.random()), 15)
+                            logger.info(f"HTTP error {e.response.status_code}. Retrying in {sleep_time:.2f} seconds")
+                    else:
+                        # Network error - standard backoff
+                        sleep_time = min(2 ** retry_count + (0.1 * random.random()), 15)
+                        logger.info(f"Network error (no status code). Retrying in {sleep_time:.2f} seconds")
+
+                    time.sleep(sleep_time)
+                else:
+                    logger.error(f"Failed to get user token after {max_retries} attempts: {e}")
+                    if hasattr(e, 'response') and e.response is not None:
+                        logger.error(f"Response status code: {e.response.status_code}")
+                        logger.error(f"Response content: {e.response.text[:500]}...")
+                    return None
+
+        # If we've exhausted all retries or exceeded max time
+        logger.error(f"Failed to get user token after {retry_count} attempts or {max_time} seconds")
+        return None
+
+    def _make_options_request(self, url: str) -> bool:
+        """
+        Make an OPTIONS request to check CORS before making the actual request.
+        This mimics browser behavior.
+
+        Args:
+            url: URL to make the OPTIONS request to
+
+        Returns:
+            True if the OPTIONS request was successful, False otherwise
+        """
         try:
-            response = requests.post(self.token_url, headers=headers, data=payload, timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
-            token = response.json().get("access_token")
-            logger.info("Token fetched successfully")
-            return token
+            # Extract the base URL without query parameters for OPTIONS request
+            base_url = url.split('?')[0]
+            logger.info(f"Making OPTIONS request to: {base_url}")
+
+            # Headers for OPTIONS request
+            options_headers = {
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization",
+                "Origin": "https://base.healthyw8.gamebus.eu",
+                "Referer": "https://base.healthyw8.gamebus.eu/"
+            }
+
+            # Make the OPTIONS request
+            options_response = requests.options(base_url, headers=options_headers, timeout=REQUEST_TIMEOUT)
+
+            # Log response status and headers for debugging
+            logger.info(f"OPTIONS response status: {options_response.status_code}")
+            logger.debug(f"OPTIONS response headers: {options_response.headers}")
+
+            # Check if the OPTIONS request was successful
+            if options_response.status_code == 200:
+                logger.info("OPTIONS request successful")
+                return True
+            else:
+                logger.warning(f"OPTIONS request failed with status code: {options_response.status_code}")
+                return False
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to get user token: {e}")
-            return None
+            logger.error(f"Failed to make OPTIONS request: {e}")
+            return False
 
     def _fetch_paginated_data(self, data_url: str, token: str, page_size: int = DEFAULT_PAGE_SIZE) -> Tuple[List[Dict[str, Any]], List[str]]:
         """
@@ -77,7 +184,12 @@ class GameBusClient:
             - List of data points
             - List of raw JSON responses
         """
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Origin": "https://base.healthyw8.gamebus.eu",
+            "Referer": "https://base.healthyw8.gamebus.eu/",
+            "Accept": "application/json, text/plain, */*"
+        }
         logger.info(f"Fetching paginated data from URL: {data_url}")
 
         all_data = []
@@ -98,6 +210,9 @@ class GameBusClient:
 
             while retry_count < MAX_RETRIES and not success and (time.time() - start_time) < max_time:
                 try:
+                    # Make OPTIONS request first to mimic browser behavior
+                    self._make_options_request(paginated_url)
+
                     logger.info(f"Requesting URL: {paginated_url}, attempt {retry_count + 1}/{MAX_RETRIES}")
                     response = requests.get(paginated_url, headers=headers, timeout=REQUEST_TIMEOUT)
 
@@ -143,25 +258,38 @@ class GameBusClient:
                         logger.warning(f"Failed to retrieve data for page {page}, attempt {retry_count}/{MAX_RETRIES}: {e}")
 
                         # Check for rate limiting (status code 429)
-                        if hasattr(e, 'response') and e.response is not None and e.response.status_code == 429:
-                            # Get retry-after header if available
-                            retry_after = e.response.headers.get('Retry-After')
-                            if retry_after:
-                                try:
-                                    # Try to parse as integer seconds
-                                    sleep_time = int(retry_after)
-                                except ValueError:
-                                    # Default to exponential backoff
-                                    sleep_time = min(2 ** retry_count + (0.1 * random.random()), 30)
-                            else:
-                                # Default to exponential backoff with longer wait for rate limiting
-                                sleep_time = min(5 ** retry_count + (0.5 * random.random()), 60)
+                        if hasattr(e, 'response') and e.response is not None:
+                            if e.response.status_code == 429:
+                                # Get retry-after header if available
+                                retry_after = e.response.headers.get('Retry-After')
+                                if retry_after:
+                                    try:
+                                        # Try to parse as integer seconds
+                                        sleep_time = int(retry_after)
+                                    except ValueError:
+                                        # Default to exponential backoff
+                                        sleep_time = min(2 ** retry_count + (0.1 * random.random()), 30)
+                                else:
+                                    # Default to exponential backoff with longer wait for rate limiting
+                                    sleep_time = min(5 ** retry_count + (0.5 * random.random()), 60)
 
-                            logger.warning(f"Rate limit exceeded. Waiting for {sleep_time:.2f} seconds before retrying.")
+                                logger.warning(f"Rate limit exceeded. Waiting for {sleep_time:.2f} seconds before retrying.")
+                            elif e.response.status_code >= 500:
+                                # Server error (5xx) - use longer backoff times
+                                sleep_time = min(10 ** retry_count + (1.0 * random.random()), 120)  # Much longer wait for server errors
+                                logger.warning(f"Server error (status code: {e.response.status_code}). Waiting for {sleep_time:.2f} seconds before retrying.")
+                                # Log more details about the error
+                                logger.error(f"Server error details: {e}")
+                                if hasattr(e.response, 'text'):
+                                    logger.error(f"Response content: {e.response.text[:1000]}...")  # Log more content for server errors
+                            else:
+                                # Standard exponential backoff with jitter for other errors
+                                sleep_time = min(2 ** retry_count + (0.1 * random.random()), 15)  # Increased max sleep time
+                                logger.info(f"HTTP error {e.response.status_code}. Retrying in {sleep_time:.2f} seconds")
                         else:
-                            # Standard exponential backoff with jitter for other errors
+                            # Standard exponential backoff with jitter for other errors (no response object)
                             sleep_time = min(2 ** retry_count + (0.1 * random.random()), 15)  # Increased max sleep time
-                            logger.info(f"Retrying in {sleep_time:.2f} seconds")
+                            logger.info(f"Network error (no status code). Retrying in {sleep_time:.2f} seconds")
 
                         time.sleep(sleep_time)
                     else:
@@ -200,20 +328,76 @@ class GameBusClient:
             - User email or None if not available
         """
         headers = {
-            "Authorization": f"Bearer {token}"
+            "Authorization": f"Bearer {token}",
+            "Origin": "https://base.healthyw8.gamebus.eu",
+            "Referer": "https://base.healthyw8.gamebus.eu/",
+            "Accept": "application/json, text/plain, */*"
         }
 
-        try:
-            response = requests.get(self.user_id_url, headers=headers, timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
-            user_data = response.json()
-            user_id = user_data.get("player", {}).get("id")
-            user_email = user_data.get("email")
-            logger.info("User ID and email fetched successfully")
-            return user_id, user_email
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to get user ID and email: {e}")
-            return None, None
+        # Add retry logic with exponential backoff
+        retry_count = 0
+        max_retries = MAX_RETRIES
+        start_time = time.time()
+        max_time = 60  # Maximum time in seconds for the user ID retrieval process
+
+        while retry_count < max_retries and (time.time() - start_time) < max_time:
+            try:
+                # Make OPTIONS request first to mimic browser behavior
+                self._make_options_request(self.user_id_url)
+
+                logger.info(f"Requesting user ID, attempt {retry_count + 1}/{max_retries}")
+                response = requests.get(self.user_id_url, headers=headers, timeout=REQUEST_TIMEOUT)
+                response.raise_for_status()
+                user_data = response.json()
+                user_id = user_data.get("player", {}).get("id")
+                user_email = user_data.get("email")
+
+                # Validate that user_id is an integer
+                if not isinstance(user_id, int):
+                    logger.error(f"Invalid user ID format: {user_id}. Expected an integer.")
+                    return None, None
+
+                logger.info(f"User ID ({user_id}) and email fetched successfully")
+                return user_id, user_email
+            except requests.exceptions.RequestException as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    logger.warning(f"Failed to get user ID and email, attempt {retry_count}/{max_retries}: {e}")
+
+                    # Determine sleep time based on error type
+                    if hasattr(e, 'response') and e.response is not None:
+                        if e.response.status_code == 429:
+                            # Rate limiting - use longer backoff
+                            sleep_time = min(5 ** retry_count + (0.5 * random.random()), 60)
+                            logger.warning(f"Rate limit exceeded. Waiting for {sleep_time:.2f} seconds before retrying.")
+                        elif e.response.status_code >= 500:
+                            # Server error (5xx) - use longer backoff times
+                            sleep_time = min(10 ** retry_count + (1.0 * random.random()), 120)
+                            logger.warning(f"Server error (status code: {e.response.status_code}). Waiting for {sleep_time:.2f} seconds before retrying.")
+                            # Log more details about the error
+                            logger.error(f"Server error details: {e}")
+                            if hasattr(e.response, 'text'):
+                                logger.error(f"Response content: {e.response.text[:1000]}...")
+                        else:
+                            # Standard exponential backoff for other errors
+                            sleep_time = min(2 ** retry_count + (0.1 * random.random()), 15)
+                            logger.info(f"HTTP error {e.response.status_code}. Retrying in {sleep_time:.2f} seconds")
+                    else:
+                        # Network error - standard backoff
+                        sleep_time = min(2 ** retry_count + (0.1 * random.random()), 15)
+                        logger.info(f"Network error (no status code). Retrying in {sleep_time:.2f} seconds")
+
+                    time.sleep(sleep_time)
+                else:
+                    logger.error(f"Failed to get user ID and email after {max_retries} attempts: {e}")
+                    if hasattr(e, 'response') and e.response is not None:
+                        logger.error(f"Response status code: {e.response.status_code}")
+                        logger.error(f"Response content: {e.response.text[:500]}...")
+                    return None, None
+
+        # If we've exhausted all retries or exceeded max time
+        logger.error(f"Failed to get user ID and email after {retry_count} attempts or {max_time} seconds")
+        return None, None
 
     def get_user_data(self, token: str, user_id: int, game_descriptor: str, 
                        page_size: int = DEFAULT_PAGE_SIZE, try_all_descriptors: bool = False) -> tuple[List[Dict[str, Any]], str, List[str]]:
@@ -222,7 +406,7 @@ class GameBusClient:
 
         Args:
             token: Access token
-            user_id: User ID
+            user_id: User ID (must be an integer)
             game_descriptor: Type of data to retrieve (e.g., "GEOFENCE", "LOG_MOOD")
             page_size: Number of items per page
             try_all_descriptors: If True, try all valid game descriptors if the specified one doesn't return data
@@ -233,6 +417,10 @@ class GameBusClient:
             - The actual game descriptor used to fetch the data
             - List of raw JSON responses
         """
+        # Validate that user_id is an integer
+        if not isinstance(user_id, int):
+            logger.error(f"Invalid user ID format: {user_id}. Expected an integer.")
+            return [], game_descriptor, []
         # Create a cache key based on user_id and game_descriptor
         cache_key = f"{user_id}_{game_descriptor}"
 
@@ -248,7 +436,12 @@ class GameBusClient:
         if game_descriptor not in VALID_GAME_DESCRIPTORS:
             logger.warning(f"Game descriptor '{game_descriptor}' not in VALID_GAME_DESCRIPTORS. Attempting to use it anyway.")
 
-        headers = {"Authorization": f"Bearer {token}"}
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Origin": "https://base.healthyw8.gamebus.eu",
+            "Referer": "https://base.healthyw8.gamebus.eu/",
+            "Accept": "application/json, text/plain, */*"
+        }
 
         # Construct URL based on game descriptor
         urls_to_try = []

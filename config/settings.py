@@ -57,18 +57,18 @@ VALID_GAME_DESCRIPTORS = [
     "NUTRITION_SUMMARY",   # AGGREGATION_LEVEL, SUMMARY_SCORE, CARBS_CONFORMANCE, FAT_CONFORMANCE, FIBER_CONFORMANCE
     "NUTRITION_DIARY_VID", # DESCRIPTION, IS_COMPLIANT, REF_TO_MEAL_PLAN, MEAL_TOTAL_WEIGHT_ESTIMATED_G, MEAL_CARB_WEIGHT_ESTIMATED_G, VIDEO
     "GEOFENCE",            # LATITUDE, LONGITUDE, ALTIDUDE, SPEED, ERROR, TIMESTAMP
-    "SENSOR_LOG(DETAIL)",  # Sensor log details
-    "SOCIAL_CONTEXT",      # Social context information
-    "NIGHT_AGGREGATE",     # Aggregated night data
-    "BOWEL_MOVEMENT_FREQUENCY", # Frequency of bowel movements
-    "CONSTIPATION_EXPERIENCE", # Constipation experience data
-    "DIARRHEA_EXPERIENCE", # Diarrhea experience data
-    "BLOATING_EXPERIENCE", # Bloating experience data
-    "STORE_STRESSLEVEL_RAW", # Raw stress level data
-    "STORE_HEARTRATE_RAW", # Raw heart rate data
-    "ATTRACT_ATTENDEE",    # Attendee attraction data
-    "ACCEPT_INVITATION",   # Invitation acceptance data
-    "PLAN_MEETING"         # Meeting planning data
+    # "SENSOR_LOG(DETAIL)",  # Sensor log details
+    # "SOCIAL_CONTEXT",      # Social context information
+    # "NIGHT_AGGREGATE",     # Aggregated night data
+    # "BOWEL_MOVEMENT_FREQUENCY", # Frequency of bowel movements
+    # "CONSTIPATION_EXPERIENCE", # Constipation experience data
+    # "DIARRHEA_EXPERIENCE", # Diarrhea experience data
+    # "BLOATING_EXPERIENCE", # Bloating experience data
+    # "STORE_STRESSLEVEL_RAW", # Raw stress level data
+    # "STORE_HEARTRATE_RAW", # Raw heart rate data
+    # "ATTRACT_ATTENDEE",    # Attendee attraction data
+    # "ACCEPT_INVITATION",   # Invitation acceptance data
+    # "PLAN_MEETING"         # Meeting planning data
 ]
 
 # Logging configuration

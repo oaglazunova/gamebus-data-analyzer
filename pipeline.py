@@ -99,10 +99,13 @@ def run_extraction(user_row: pd.Series) -> Dict[str, List[Dict[str, Any]]]:
         return {}
 
     logger.info(f"Getting user ID for user: {username}")
-    user_id = client.get_user_id(token)
-    if not user_id:
+    user_id_result = client.get_user_id(token)
+    if not user_id_result:
         logger.error(f"Failed to get user ID for user {username}")
         return {}
+
+    # Extract the numeric ID and email from the tuple
+    user_id, user_email = user_id_result
 
     logger.info(f"Successfully authenticated user {username} with user ID {user_id}")
 
@@ -117,7 +120,7 @@ def run_extraction(user_row: pd.Series) -> Dict[str, List[Dict[str, Any]]]:
     logger.info(f"Using AllDataCollector to extract all data types for user {username}")
 
     # Create the AllDataCollector
-    all_collector = AllDataCollector(client, token, user_id)
+    all_collector = AllDataCollector(client, token, user_id, user_email)
 
     # Flag to indicate if collection is complete
     collection_complete = False
@@ -269,18 +272,6 @@ def main():
                     # We don't wait for futures here to allow immediate interruption
                     raise  # Re-raise to be caught by the outer try-except
 
-            # Check if any data was actually extracted
-            data_extracted = False
-            for user_email, user_results in all_results.items():
-                if user_results:  # Check if user_results is not empty
-                    data_extracted = True
-                    break
-
-            if data_extracted:
-                logger.info("Data extraction completed successfully")
-            else:
-                logger.warning("Data extraction completed, but no data was extracted for any user")
-                print("Warning: Data extraction completed, but no data was extracted for any user")
         except KeyboardInterrupt:
             logger.warning("Data extraction interrupted by user. Partial results may have been saved.")
             print("\nData extraction interrupted by user. Partial results may have been saved.")

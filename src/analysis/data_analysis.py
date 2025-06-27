@@ -3,7 +3,7 @@ GameBus Health Behavior Mining Data Analysis Script
 
 This script analyzes data from the GameBus Health Behavior Mining project, including:
 1. Excel files in the config directory containing campaign, and activity data
-2. JSON files in the data_raw directory containing player-specific data like activity types, heart rates, and mood logs
+2. JSON files in the data_raw directory containing player-specific data like activity types, and mood logs
 
 The script generates:
 1. Descriptive statistics tables for each variable, providing insights into:
@@ -15,7 +15,6 @@ The script generates:
    - Activity patterns and distributions
    - Player engagement and participation
    - Movement types and physical activity metrics
-   - Heart rate data and patterns
 
 3. Bivariate analyses to explore relationships between variables:
    - Correlation analyses
@@ -84,6 +83,16 @@ logger.propagate = False
 # Set style for plots
 plt.style.use('ggplot')
 sns.set(style="whitegrid")
+
+# Colormaps for different types of visualizations
+BAR_COLORMAP = 'viridis'  # Perceptually uniform, good for categorical data
+PIE_COLORMAP = 'tab10'    # Distinct colors for categorical data
+CORRELATION_HEATMAP_COLORMAP = 'coolwarm'  # Diverging colormap for correlation matrices
+SEQUENTIAL_HEATMAP_COLORMAP = 'turbo'  # Sequential colormap for heatmaps showing magnitude
+LINE_COLORMAP = 'tab10'   # Good for distinguishing multiple lines
+HISTOGRAM_COLORMAP = 'Blues'  # Sequential colormap for frequency distributions
+BOX_COLORMAP = 'Set2'     # Categorical colormap for categorical comparisons
+REGRESSION_COLORMAP = 'Blues'  # Sequential colormap for showing relationships
 
 # Constants
 OUTPUT_VISUALIZATIONS_DIR = os.path.join(PROJECT_ROOT, 'data_analysis', 'visualizations')
@@ -164,7 +173,7 @@ def perform_bivariate_analysis(df, title, filename=None):
 
 		# Create correlation heatmap
 		def plot_correlation_heatmap():
-			sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+			sns.heatmap(corr_matrix, annot=True, cmap=CORRELATION_HEATMAP_COLORMAP, fmt=".2f", linewidths=0.5)
 			plt.title(f'{title} - Correlation Matrix')
 
 		create_and_save_figure(
@@ -423,7 +432,7 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 			logger.warning("No activity types found for distribution visualization")
 		else:
 			def plot_activity_types_distribution():
-				ax = activity_counts.plot(kind='bar')
+				ax = activity_counts.plot(kind='bar', colormap=BAR_COLORMAP)
 				plt.title('Distribution of Activity Types')
 				plt.xlabel('Activity Type')
 				plt.ylabel('Count')
@@ -437,6 +446,134 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 			logger.info("Created activity types distribution visualization")
 	except Exception as e:
 		logger.error(f"Error creating activity types distribution visualization: {e}")
+		# Continue with other visualizations even if this one fails
+
+	# Wave Comparisons Barplots
+	try:
+		# This visualization compares metrics across different waves (time periods)
+		# Helps understand how user behavior changes over time
+
+		# Check if 'wave' column exists, if not, create it based on date ranges
+		if 'wave' not in activities.columns:
+			# Determine the start date and calculate waves based on weekly periods
+			start_date = activities['date'].min()
+			activities['wave'] = ((activities['date'] - start_date).dt.days // 7) + 1
+			logger.info(f"Created 'wave' column with values from 1 to {activities['wave'].max()}")
+
+		# Function to create wave comparison barplots
+		def plot_wave_comparisons():
+			# Create a figure with multiple subplots
+			fig, axes = plt.subplots(2, 1, figsize=(12, 12))
+
+			# 1. Activities per wave
+			wave_activity_counts = activities.groupby('wave').size()
+			wave_activity_counts.plot(kind='bar', ax=axes[0], colormap=BAR_COLORMAP)
+			axes[0].set_title('Number of Activities per Wave')
+			axes[0].set_xlabel('Wave')
+			axes[0].set_ylabel('Number of Activities')
+
+			# 2. Average points per wave
+			wave_points = activities.groupby('wave')['points'].mean()
+			wave_points.plot(kind='bar', ax=axes[1], colormap=BAR_COLORMAP)
+			axes[1].set_title('Average Points per Wave')
+			axes[1].set_xlabel('Wave')
+			axes[1].set_ylabel('Average Points')
+
+			plt.tight_layout()
+
+		create_and_save_figure(
+			plot_wave_comparisons,
+			f'{OUTPUT_VISUALIZATIONS_DIR}/wave_comparisons.png',
+			figsize=(12, 12)
+		)
+		logger.info("Created wave comparisons barplots")
+
+		# If 'pid' (player ID) column exists, create wave comparisons by player
+		if 'pid' in activities.columns:
+			def plot_wave_comparisons_by_player():
+				# Get the top 5 most active players
+				top_players = activities['pid'].value_counts().nlargest(5).index
+
+				# Filter activities for top players
+				top_player_activities = activities[activities['pid'].isin(top_players)]
+
+				# Create pivot table: waves vs players with activity counts
+				player_wave_counts = pd.crosstab(
+					top_player_activities['wave'], 
+					top_player_activities['pid']
+				)
+
+				# Plot the data
+				player_wave_counts.plot(kind='bar', figsize=(12, 6), colormap=BAR_COLORMAP)
+				plt.title('Activities per Wave by Top 5 Players')
+				plt.xlabel('Wave')
+				plt.ylabel('Number of Activities')
+				plt.legend(title='Player ID')
+				plt.tight_layout()
+
+			create_and_save_figure(
+				plot_wave_comparisons_by_player,
+				f'{OUTPUT_VISUALIZATIONS_DIR}/wave_comparisons_by_player.png',
+				figsize=(12, 8)
+			)
+			logger.info("Created wave comparisons by player barplots")
+
+		# Create wave comparisons by activity type
+		def plot_wave_comparisons_by_activity_type():
+			# Get the top 5 most common activity types
+			top_types = activities['type'].value_counts().nlargest(5).index
+
+			# Filter activities for top types
+			top_type_activities = activities[activities['type'].isin(top_types)]
+
+			# Create pivot table: waves vs activity types with activity counts
+			type_wave_counts = pd.crosstab(
+				top_type_activities['wave'], 
+				top_type_activities['type']
+			)
+
+			# Plot the data
+			type_wave_counts.plot(kind='bar', figsize=(12, 6), colormap=BAR_COLORMAP)
+			plt.title('Activities per Wave by Top 5 Activity Types')
+			plt.xlabel('Wave')
+			plt.ylabel('Number of Activities')
+			plt.legend(title='Activity Type')
+			plt.tight_layout()
+
+		create_and_save_figure(
+			plot_wave_comparisons_by_activity_type,
+			f'{OUTPUT_VISUALIZATIONS_DIR}/wave_comparisons_by_activity_type.png',
+			figsize=(12, 8)
+		)
+		logger.info("Created wave comparisons by activity type barplots")
+
+		# Create wave comparisons of average points by activity type
+		def plot_wave_points_by_activity_type():
+			# Get the top 5 most common activity types
+			top_types = activities['type'].value_counts().nlargest(5).index
+
+			# Filter activities for top types
+			top_type_activities = activities[activities['type'].isin(top_types)]
+
+			# Group by wave and type, calculate mean points
+			wave_type_points = top_type_activities.groupby(['wave', 'type'])['points'].mean().unstack()
+
+			# Plot the data
+			wave_type_points.plot(kind='bar', figsize=(12, 6), colormap=BAR_COLORMAP)
+			plt.title('Average Points per Wave by Top 5 Activity Types')
+			plt.xlabel('Wave')
+			plt.ylabel('Average Points')
+			plt.legend(title='Activity Type')
+			plt.tight_layout()
+
+		create_and_save_figure(
+			plot_wave_points_by_activity_type,
+			f'{OUTPUT_VISUALIZATIONS_DIR}/wave_points_by_activity_type.png',
+			figsize=(12, 8)
+		)
+		logger.info("Created wave comparisons of points by activity type barplots")
+	except Exception as e:
+		logger.error(f"Error creating wave comparisons barplots: {e}")
 		# Continue with other visualizations even if this one fails
 
 	# 2. Activities over time
@@ -474,7 +611,7 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 			logger.warning("No points data for activity type distribution visualization")
 		else:
 			def plot_points_by_activity_type():
-				points_by_type.plot(kind='bar')
+				points_by_type.plot(kind='bar', colormap=BAR_COLORMAP)
 				plt.title('Total Points by Activity Type')
 				plt.xlabel('Activity Type')
 				plt.ylabel('Total Points')
@@ -508,7 +645,7 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				else:
 					plt.title('Number of Activities by User')
 
-				plot_data.plot(kind='bar')
+				plot_data.plot(kind='bar', colormap=BAR_COLORMAP)
 				plt.xlabel('User ID')
 				plt.ylabel('Number of Activities')
 
@@ -547,13 +684,9 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 
 					user_type_counts_norm = user_type_counts.div(row_sums, axis=0)
 
-					# Limit to top 10 users by activity count for readability
-					if len(user_activity) < 10:
-						top_users = user_activity.index
-						logger.info(f"Using all {len(top_users)} users for activity type heatmap")
-					else:
-						top_users = user_activity.head(10).index
-						logger.info("Using top 10 users for activity type heatmap")
+					# Use all users as per requirements
+					top_users = user_activity.index
+					logger.info(f"Using all {len(top_users)} users for activity type heatmap")
 
 					# Check if all top users are in the normalized dataframe
 					valid_users = [p for p in top_users if p in user_type_counts_norm.index]
@@ -570,15 +703,27 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 							logger.info(f"Limited activity type heatmap to top 15 activity types out of {user_type_counts.shape[1]}")
 
 						def plot_activity_type_by_user():
-							sns.heatmap(user_type_heatmap, cmap='YlGnBu', annot=True, fmt='.2f', linewidths=0.5)
-							plt.title(f'Activity Type Distribution by User (Top {len(valid_users)} Users)')
+							# Adjust font size for annotations based on number of users
+							# Start with font size 10 for <= 10 users, decrease as user count increases
+							annot_fontsize = max(6, 10 - (len(valid_users) - 10) / 10)
+
+							sns.heatmap(user_type_heatmap, cmap=SEQUENTIAL_HEATMAP_COLORMAP, 
+									   annot=True, fmt='.2f', linewidths=0.5, 
+									   annot_kws={'fontsize': annot_fontsize})
+							plt.title(f'Activity Type Distribution by User (All {len(valid_users)} Users)')
 							plt.xlabel('Activity Type')
 							plt.ylabel('User ID')
+
+						# Adjust figure size based on number of users
+						# Base size is 14x8, but add 0.5 height for each additional 5 users beyond 10
+						height = 8 + max(0, (len(valid_users) - 10) / 5 * 0.5)
+						# Cap the height at a reasonable maximum
+						height = min(height, 20)
 
 						create_and_save_figure(
 							plot_activity_type_by_user,
 							f'{OUTPUT_VISUALIZATIONS_DIR}/activity_type_by_user.png',
-							figsize=(14, 8)
+							figsize=(14, height)
 						)
 						logger.info("Created activity type by user visualization")
 				except Exception as e:
@@ -686,7 +831,7 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 		else:
 			# 1. Histogram of drop-out rates
 			def plot_dropout_rates_histogram():
-				sns.histplot(user_dropout['dropout_days'], kde=True, bins=20)
+				sns.histplot(user_dropout['dropout_days'], kde=True, bins=20, palette=HISTOGRAM_COLORMAP)
 				plt.title('Distribution of User Drop-out Rates')
 				plt.xlabel('Time Between First and Last Activity (days)')
 				plt.ylabel('Number of Users')
@@ -701,25 +846,110 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 		logger.error(f"Error creating dropout rates histogram: {e}")
 		# Continue with other visualizations even if this one fails
 
-	# 2. Box plot of drop-out rates
+	# Calculate joining rates
 	try:
-		if user_dropout.empty or 'dropout_days' not in user_dropout.columns:
-			logger.warning("No dropout data available for boxplot visualization")
+		# Use the same user_dropout DataFrame which already has first_activity
+		if user_dropout.empty or 'first_activity' not in user_dropout.columns:
+			logger.warning("No joining data available for analysis")
+			joining_metrics = None
+		elif campaign_start is None:
+			logger.warning("Campaign start date not available for joining rate analysis")
+			joining_metrics = None
 		else:
-			def plot_dropout_rates_boxplot():
-				sns.boxplot(y=user_dropout['dropout_days'])
-				plt.title('Distribution of User Drop-out Rates')
-				plt.ylabel('Time Between First and Last Activity (days)')
+			# Calculate days between campaign start and first activity
+			user_dropout['joining_days'] = (user_dropout['first_activity'] - campaign_start).dt.days
+
+			# Handle negative joining days (users who joined before campaign start)
+			if (user_dropout['joining_days'] < 0).any():
+				logger.info("Some users joined before the official campaign start")
+
+			# Generate descriptive statistics for joining rates
+			joining_stats = user_dropout['joining_days'].describe(percentiles=[.25, .5, .75, .9])
+			joining_stats = joining_stats.round(2)
+
+			# Create joining metrics dictionary
+			joining_metrics = {
+				'avg_joining_days': joining_stats['mean'],
+				'median_joining_days': joining_stats['50%'],
+				'min_joining_days': joining_stats['min'],
+				'max_joining_days': joining_stats['max']
+			}
+
+			logger.info(f"Calculated joining metrics: avg={joining_metrics['avg_joining_days']:.1f} days, " +
+						f"median={joining_metrics['median_joining_days']:.1f} days")
+
+			# Create visualizations for joining rates
+			# 1. Histogram of joining rates
+			def plot_joining_rates_histogram():
+				sns.histplot(user_dropout['joining_days'], kde=True, bins=20, palette=HISTOGRAM_COLORMAP)
+				plt.title('Distribution of User Joining Rates')
+				plt.xlabel('Days Between Campaign Start and First Activity')
+				plt.ylabel('Number of Users')
 
 			create_and_save_figure(
-				plot_dropout_rates_boxplot,
-				f'{OUTPUT_VISUALIZATIONS_DIR}/dropout_rates_boxplot.png',
+				plot_joining_rates_histogram,
+				f'{OUTPUT_VISUALIZATIONS_DIR}/joining_rates_distribution.png',
 				figsize=(10, 6)
 			)
-			logger.info("Created dropout rates boxplot visualization")
+			logger.info("Created joining rates histogram visualization")
+
+			# 3. Combined plot of dropout and joining rates (KDE)
+			def plot_combined_rates():
+				plt.figure(figsize=(12, 7))
+				# Plot KDE for dropout rates
+				sns.kdeplot(user_dropout['dropout_days'], label='Dropout Rates', color='blue', fill=True, alpha=0.3)
+				# Plot KDE for joining rates
+				sns.kdeplot(user_dropout['joining_days'], label='Joining Rates', color='red', fill=True, alpha=0.3)
+				plt.title('Distribution of User Dropout and Joining Rates')
+				plt.xlabel('Days')
+				plt.ylabel('Density')
+				plt.legend()
+				# Add explanatory text
+				plt.figtext(0.01, 0.01, 
+					'Dropout Rates: Days between first and last activity\nJoining Rates: Days between campaign start and first activity',
+					fontsize=9, ha='left')
+
+			create_and_save_figure(
+				plot_combined_rates,
+				f'{OUTPUT_VISUALIZATIONS_DIR}/combined_dropout_joining_rates.png',
+				figsize=(12, 7)
+			)
+			logger.info("Created combined dropout and joining rates visualization (KDE)")
+
+			# 4. Combined boxplot of dropout and joining rates
+			def plot_combined_boxplots():
+				# Prepare data for side-by-side boxplots
+				import pandas as pd
+				# Create a long-format DataFrame for seaborn
+				dropout_df = pd.DataFrame({
+					'days': user_dropout['dropout_days'],
+					'metric': 'Dropout Rates'
+				})
+				joining_df = pd.DataFrame({
+					'days': user_dropout['joining_days'],
+					'metric': 'Joining Rates'
+				})
+				combined_df = pd.concat([dropout_df, joining_df])
+
+				# Create the boxplot
+				sns.boxplot(x='metric', y='days', data=combined_df, palette=['blue', 'red'])
+				plt.title('Distribution of User Dropout and Joining Rates')
+				plt.xlabel('')
+				plt.ylabel('Days')
+				# Add explanatory text
+				plt.figtext(0.01, 0.01, 
+					'Dropout Rates: Days between first and last activity\nJoining Rates: Days between campaign start and first activity',
+					fontsize=9, ha='left')
+
+			create_and_save_figure(
+				plot_combined_boxplots,
+				f'{OUTPUT_VISUALIZATIONS_DIR}/combined_dropout_joining_boxplots.png',
+				figsize=(12, 7)
+			)
+			logger.info("Created combined dropout and joining rates boxplot visualization")
 	except Exception as e:
-		logger.error(f"Error creating dropout rates boxplot: {e}")
-		# Continue with other visualizations even if this one fails
+		logger.error(f"Error calculating or visualizing joining rates: {e}")
+		joining_metrics = None
 
 	# Check for app usage data for both Nutrida and GameBus
 	# Nutrida: VISIT_APP_PAGE events with DURATION_MS
@@ -1211,7 +1441,7 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 					logger.warning("No activities data by day of week for visualization")
 				else:
 					def plot_usage_by_day_of_week():
-						activities_by_day.plot(kind='bar')
+						activities_by_day.plot(kind='bar', colormap=BAR_COLORMAP)
 						plt.title('Usage by Day of Week')
 						plt.xlabel('Day of Week')
 						plt.ylabel('Number of Activities')
@@ -1295,7 +1525,7 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 						def plot_activity_heatmap_by_time():
 							# Use a fixed format string for the heatmap
 							# We'll use '.0f' for all values since most will be integers
-							sns.heatmap(activity_heatmap_data, cmap='YlGnBu', annot=True,
+							sns.heatmap(activity_heatmap_data, cmap=SEQUENTIAL_HEATMAP_COLORMAP, annot=True,
 										fmt='.1f', linewidths=0.5)
 							plt.title('Activity Heatmap by Day of Week and Hour of Day')
 							plt.xlabel('Hour of Day')
@@ -1382,7 +1612,7 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 
 							# Plot stacked bar chart
 							def plot_activity_types_stacked_by_date():
-								activity_types_by_date_filtered.plot(kind='bar', stacked=True)
+								activity_types_by_date_filtered.plot(kind='bar', stacked=True, colormap=BAR_COLORMAP)
 								plt.title(title)
 								plt.xlabel(xlabel)
 								plt.ylabel('Number of Activities')
@@ -1471,7 +1701,16 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 								logger.warning("Empty filtered heatmap data, skipping visualization")
 							else:
 								def plot_user_engagement_heatmap():
-									sns.heatmap(user_activity_heatmap_filtered, cmap='YlGnBu', linewidths=0.5)
+									# Adjust font size for annotations based on number of users and dates
+									# Start with font size 10 for small matrices, decrease as size increases
+									num_users = user_activity_heatmap_filtered.shape[0]
+									num_dates = user_activity_heatmap_filtered.shape[1]
+									annot_fontsize = max(6, 10 - (num_users * num_dates) / 200)
+
+									# Use integer format for activity counts
+									sns.heatmap(user_activity_heatmap_filtered, cmap=SEQUENTIAL_HEATMAP_COLORMAP, 
+											  annot=True, fmt='.0f', linewidths=0.5,
+											  annot_kws={'fontsize': annot_fontsize})
 									plt.title(title)
 									plt.xlabel(xlabel)
 									plt.ylabel('User ID')
@@ -2048,11 +2287,396 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 
 	# Return the results
 	try:
-		return activities, unique_users_count, usage_metrics, dropout_metrics, campaign_metrics
+		return activities, unique_users_count, usage_metrics, dropout_metrics, joining_metrics, campaign_metrics
 	except Exception as e:
 		logger.error(f"Error returning analysis results: {e}")
 		# Return default values if there's an error
-		return None, 0, None, None, None
+		return None, 0, None, None, None, None
+
+
+def classify_user_engagement(df):
+	"""
+    Classifies users into active and passive engagement categories based on their activities.
+
+    Args:
+        df (DataFrame): DataFrame containing user activity data
+
+    Returns:
+        DataFrame: Original DataFrame with additional 'engagement_type' column
+    """
+	if 'user_id' not in df.columns:
+		return df
+
+	# Group by user to get their total activities
+	user_summary = df.groupby('user_id').agg({
+		'duration': 'sum',
+		'steps': 'sum',
+		'cals': 'sum'
+	}).reset_index()
+
+	# Classify users based on their activity levels
+	def determine_engagement(row):
+		if row['duration'] > 0 or row['steps'] > 0 or row['cals'] > 0:
+			return 'Active'
+		return 'Passive'
+
+	user_summary['engagement_type'] = user_summary.apply(determine_engagement, axis=1)
+
+	# Merge the engagement type back to the original DataFrame
+	df = df.merge(
+		user_summary[['user_id', 'engagement_type']],
+		on='user_id',
+		how='left'
+	)
+
+	return df
+
+
+def analyze_engagement_patterns(df):
+	"""
+    Analyzes engagement patterns by comparing active and passive users.
+
+    Args:
+        df (DataFrame): DataFrame containing user activity data with engagement_type
+    """
+	if 'engagement_type' not in df.columns:
+		logger.warning("Engagement type not found in data. Run classify_user_engagement first.")
+		return
+
+	# Calculate engagement statistics
+	engagement_stats = df.groupby('engagement_type')['user_id'].nunique()
+	logger.info(f"\nUser engagement distribution:\n{engagement_stats}")
+
+	# Engagement distribution visualization
+	def plot_engagement_distribution():
+		plt.figure(figsize=(8, 6))
+		engagement_stats.plot(kind='pie', autopct='%1.1f%%', colormap=PIE_COLORMAP)
+		plt.title('Distribution of User Engagement Types')
+		plt.ylabel('')
+
+	create_and_save_figure(
+		plot_engagement_distribution,
+		os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'user_engagement_distribution.png'),
+		figsize=(8, 6)
+	)
+
+	# Activity metrics by engagement type
+	metrics = ['steps', 'cals', 'duration']
+	for metric in metrics:
+		def plot_metric_by_engagement():
+			plt.figure(figsize=(10, 6))
+			sns.boxplot(data=df, x='engagement_type', y=metric, palette=BOX_COLORMAP)
+			plt.title(f'{metric.capitalize()} Distribution by Engagement Type')
+			plt.xlabel('Engagement Type')
+			plt.ylabel(metric.capitalize())
+
+		create_and_save_figure(
+			plot_metric_by_engagement,
+			os.path.join(OUTPUT_VISUALIZATIONS_DIR, f'{metric}_by_engagement.png'),
+			figsize=(10, 6)
+		)
+
+	# Statistical comparison
+	for metric in metrics:
+		active_data = df[df['engagement_type'] == 'Active'][metric]
+		passive_data = df[df['engagement_type'] == 'Passive'][metric]
+
+		if len(active_data) > 0 and len(passive_data) > 0:
+			stat, pval = stats.mannwhitneyu(
+				active_data.dropna(),
+				passive_data.dropna(),
+				alternative='two-sided'
+			)
+
+			logger.info(f"\n{metric.capitalize()} comparison:")
+			logger.info(f"Active users mean: {active_data.mean():.2f}")
+			logger.info(f"Passive users mean: {passive_data.mean():.2f}")
+			logger.info(f"Mann-Whitney U p-value: {pval:.4f}")
+
+
+def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -> None:
+	"""Analyze visualizations, challenges, and tasks data from campaign_desc.xlsx and campaign_data.xlsx
+
+    This function analyzes the hierarchical structure of:
+    - Visualizations
+    - Challenges (assigned to visualizations)
+    - Tasks (assigned to challenges)
+
+    It generates visualizations and statistics about completion rates, points, etc.
+
+    Args:
+        csv_data: Dictionary of DataFrames containing campaign data
+    """
+	logger.info("Analyzing visualizations, challenges, and tasks data...")
+
+	# Check if required data exists
+	required_sheets = ['desc_visualizations', 'desc_challenges', 'desc_tasks', 'activities']
+	missing_sheets = [sheet for sheet in required_sheets if sheet not in csv_data]
+	if missing_sheets:
+		logger.error(f"Missing required data sheets: {missing_sheets}")
+		return
+
+	# Get the data
+	visualizations_df = csv_data['desc_visualizations'].copy()
+	challenges_df = csv_data['desc_challenges'].copy()
+	tasks_df = csv_data['desc_tasks'].copy()
+	activities_df = csv_data['activities'].copy()
+
+	logger.info(f"Loaded data: {len(visualizations_df)} visualizations, {len(challenges_df)} challenges, {len(tasks_df)} tasks")
+
+	# Generate descriptive statistics
+	generate_descriptive_stats(visualizations_df, "Visualizations Data", None)
+	generate_descriptive_stats(challenges_df, "Challenges Data", None)
+	generate_descriptive_stats(tasks_df, "Tasks Data", None)
+
+	# Create a text file with summary statistics
+	summary_file_path = os.path.join(OUTPUT_STATISTICS_DIR, 'visualization_challenge_task_summary.txt')
+	with open(summary_file_path, 'w') as f:
+		f.write("# Visualization, Challenge, and Task Analysis\n\n")
+
+		# Visualizations summary
+		f.write("## Visualizations Summary\n\n")
+		f.write(f"Total number of visualizations: {len(visualizations_df)}\n")
+		if 'visualization' in visualizations_df.columns:
+			f.write("\nVisualization types:\n")
+			for viz_type, count in visualizations_df['visualization'].value_counts().items():
+				f.write(f"- {viz_type}: {count}\n")
+
+		# Challenges summary
+		f.write("\n## Challenges Summary\n\n")
+		f.write(f"Total number of challenges: {len(challenges_df)}\n")
+		if 'type' in challenges_df.columns:
+			f.write("\nChallenge types:\n")
+			for challenge_type, count in challenges_df['type'].value_counts().items():
+				f.write(f"- {challenge_type}: {count}\n")
+
+		# Tasks summary
+		f.write("\n## Tasks Summary\n\n")
+		f.write(f"Total number of tasks: {len(tasks_df)}\n")
+
+		# Points analysis
+		if 'points' in tasks_df.columns:
+			total_points = tasks_df['points'].sum()
+			avg_points = tasks_df['points'].mean()
+			max_points = tasks_df['points'].max()
+			min_points = tasks_df['points'].min()
+			f.write(f"\nPoints analysis:\n")
+			f.write(f"- Total points available: {total_points}\n")
+			f.write(f"- Average points per task: {avg_points:.2f}\n")
+			f.write(f"- Maximum points for a task: {max_points}\n")
+			f.write(f"- Minimum points for a task: {min_points}\n")
+
+		# Tasks per challenge
+		tasks_per_challenge = tasks_df['challenge'].value_counts()
+		f.write("\n## Tasks per Challenge\n\n")
+		for challenge_id, count in tasks_per_challenge.items():
+			challenge_name = challenges_df.loc[challenges_df['id'] == challenge_id, 'name'].values
+			challenge_name = challenge_name[0] if len(challenge_name) > 0 else f"Challenge {challenge_id}"
+			f.write(f"- {challenge_name}: {count} tasks\n")
+
+		# Challenges per visualization
+		if 'visualizations' in challenges_df.columns:
+			f.write("\n## Challenges per Visualization\n\n")
+			for _, viz_row in visualizations_df.iterrows():
+				viz_id = viz_row['id']
+				viz_label = viz_row['label'] if 'label' in viz_row else f"Visualization {viz_id}"
+
+				# Find challenges for this visualization
+				related_challenges = challenges_df[challenges_df['visualizations'].astype(str).str.contains(str(viz_id))]
+				f.write(f"- {viz_label}: {len(related_challenges)} challenges\n")
+
+	logger.info(f"Saved visualization, challenge, and task summary to {summary_file_path}")
+
+	# Create visualizations
+
+	# 1. Visualization of the hierarchical structure
+	try:
+		# Create a DataFrame to represent the hierarchy
+		hierarchy_data = []
+
+		for _, viz_row in visualizations_df.iterrows():
+			viz_id = viz_row['id']
+			viz_label = viz_row['label'] if 'label' in viz_row else f"Visualization {viz_id}"
+
+			# Find challenges for this visualization
+			if 'visualizations' in challenges_df.columns:
+				related_challenges = challenges_df[challenges_df['visualizations'].astype(str).str.contains(str(viz_id))]
+
+				if len(related_challenges) == 0:
+					# No challenges for this visualization
+					hierarchy_data.append({
+						'level': 'Visualization',
+						'name': viz_label,
+						'count': 0,
+						'parent': None
+					})
+				else:
+					# Add visualization with challenges
+					hierarchy_data.append({
+						'level': 'Visualization',
+						'name': viz_label,
+						'count': len(related_challenges),
+						'parent': None
+					})
+
+					# Add challenges
+					for _, challenge_row in related_challenges.iterrows():
+						challenge_id = challenge_row['id']
+						challenge_name = challenge_row['name'] if 'name' in challenge_row else f"Challenge {challenge_id}"
+
+						# Find tasks for this challenge
+						related_tasks = tasks_df[tasks_df['challenge'] == challenge_id]
+
+						hierarchy_data.append({
+							'level': 'Challenge',
+							'name': challenge_name,
+							'count': len(related_tasks),
+							'parent': viz_label
+						})
+
+		hierarchy_df = pd.DataFrame(hierarchy_data)
+
+		if not hierarchy_df.empty:
+			def plot_hierarchy_structure():
+				plt.figure(figsize=(12, 8))
+
+				# Create a grouped bar chart
+				viz_data = hierarchy_df[hierarchy_df['level'] == 'Visualization']
+				challenge_data = hierarchy_df[hierarchy_df['level'] == 'Challenge']
+
+				x = range(len(viz_data))
+				width = 0.35
+
+				plt.bar(x, viz_data['count'], width, label='Challenges per Visualization', color='skyblue')
+
+				# Add labels
+				plt.xlabel('Visualization')
+				plt.ylabel('Count')
+				plt.title('Hierarchy Structure: Visualizations and Challenges')
+				plt.xticks(x, viz_data['name'], rotation=45, ha='right')
+				plt.legend()
+				plt.tight_layout()
+
+			create_and_save_figure(
+				plot_hierarchy_structure,
+				f'{OUTPUT_VISUALIZATIONS_DIR}/visualization_challenge_hierarchy.png',
+				figsize=(14, 8)
+			)
+			logger.info("Created visualization-challenge hierarchy visualization")
+		else:
+			logger.warning("No hierarchy data available for visualization")
+	except Exception as e:
+		logger.error(f"Error creating hierarchy visualization: {e}")
+
+	# 2. Tasks per challenge visualization
+	try:
+		if not tasks_per_challenge.empty:
+			def plot_tasks_per_challenge():
+				plt.figure(figsize=(12, 8))
+
+				# Sort by number of tasks
+				sorted_data = tasks_per_challenge.sort_values(ascending=False)
+
+				# Get challenge names
+				challenge_names = []
+				for challenge_id in sorted_data.index:
+					challenge_name = challenges_df.loc[challenges_df['id'] == challenge_id, 'name'].values
+					challenge_name = challenge_name[0] if len(challenge_name) > 0 else f"Challenge {challenge_id}"
+					challenge_names.append(challenge_name)
+
+				# Create bar chart
+				plt.bar(range(len(sorted_data)), sorted_data.values, color='lightgreen')
+
+				# Add labels
+				plt.xlabel('Challenge')
+				plt.ylabel('Number of Tasks')
+				plt.title('Number of Tasks per Challenge')
+				plt.xticks(range(len(sorted_data)), challenge_names, rotation=45, ha='right')
+				plt.tight_layout()
+
+			create_and_save_figure(
+				plot_tasks_per_challenge,
+				f'{OUTPUT_VISUALIZATIONS_DIR}/tasks_per_challenge.png',
+				figsize=(14, 8)
+			)
+			logger.info("Created tasks per challenge visualization")
+		else:
+			logger.warning("No tasks per challenge data available for visualization")
+	except Exception as e:
+		logger.error(f"Error creating tasks per challenge visualization: {e}")
+
+	# 3. Points distribution visualization
+	try:
+		if 'points' in tasks_df.columns:
+			def plot_points_distribution():
+				plt.figure(figsize=(10, 6))
+
+				# Create histogram
+				plt.hist(tasks_df['points'], bins=10, color='salmon', alpha=0.7)
+
+				# Add labels
+				plt.xlabel('Points')
+				plt.ylabel('Number of Tasks')
+				plt.title('Distribution of Points across Tasks')
+				plt.grid(True, alpha=0.3)
+				plt.tight_layout()
+
+			create_and_save_figure(
+				plot_points_distribution,
+				f'{OUTPUT_VISUALIZATIONS_DIR}/points_distribution.png',
+				figsize=(10, 6)
+			)
+			logger.info("Created points distribution visualization")
+		else:
+			logger.warning("No points data available for visualization")
+	except Exception as e:
+		logger.error(f"Error creating points distribution visualization: {e}")
+
+	# 4. Task completion analysis (if activity data contains task completion information)
+	try:
+		if 'activities' in csv_data and 'type' in activities_df.columns:
+			# Try to match activities with tasks
+			# This is a simplified approach - in a real scenario, you'd need more specific matching logic
+
+			# Get unique activity types
+			activity_types = activities_df['type'].unique()
+
+			# Count activities by type
+			activity_counts = activities_df['type'].value_counts()
+
+			def plot_activity_completion():
+				plt.figure(figsize=(12, 8))
+
+				# Create bar chart
+				plt.bar(range(len(activity_counts)), activity_counts.values, color='mediumpurple')
+
+				# Add labels
+				plt.xlabel('Activity Type')
+				plt.ylabel('Count')
+				plt.title('Activity Completion by Type')
+				plt.xticks(range(len(activity_counts)), activity_counts.index, rotation=45, ha='right')
+				plt.tight_layout()
+
+			create_and_save_figure(
+				plot_activity_completion,
+				f'{OUTPUT_VISUALIZATIONS_DIR}/activity_completion.png',
+				figsize=(14, 8)
+			)
+			logger.info("Created activity completion visualization")
+
+			# Add activity completion information to the summary file
+			with open(summary_file_path, 'a') as f:
+				f.write("\n## Activity Completion Analysis\n\n")
+				f.write(f"Total activities recorded: {len(activities_df)}\n")
+				f.write("\nActivity counts by type:\n")
+				for activity_type, count in activity_counts.items():
+					f.write(f"- {activity_type}: {count}\n")
+		else:
+			logger.warning("No activity data available for completion analysis")
+	except Exception as e:
+		logger.error(f"Error creating activity completion analysis: {e}")
+
+	logger.info("Completed analysis of visualizations, challenges, and tasks")
 
 def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
 	"""Analyze user data from JSON files
@@ -2063,7 +2687,6 @@ def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
     - Steps trends over time
     - Calories burned trends over time
     - Activity provider/source analysis (e.g., via self-report, Nutrida, Garmin)
-    - Heart rate data
 
     Args:
         json_data: Dictionary of JSON data
@@ -2072,11 +2695,9 @@ def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
     """
 	# Combine activity type data from all users
 	activity_type_dfs = []
-	heartrate_dfs = []
 
 	# Map of game descriptors to activity types
 	movement_descriptors = ['WALK', 'RUN', 'BIKE', 'TRANSPORT', 'PHYSICAL_ACTIVITY', 'GENERAL_ACTIVITY']
-	heartrate_descriptors = ['LOG_MOOD']  # Assuming heart rate data might be in LOG_MOOD
 
 	for key, data in json_data.items():
 		if isinstance(data, pd.DataFrame):
@@ -2169,13 +2790,6 @@ def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
 
 								activity_type_dfs.append(movement_data)
 
-						# Check for heart rate descriptors
-						for descriptor in heartrate_descriptors:
-							if (data_copy['gameDescriptor'] == descriptor).any():
-								heartrate_data = data_copy[data_copy['gameDescriptor'] == descriptor].copy()
-								heartrate_dfs.append(heartrate_data)
-
-
 				# Special case for all_data files which might contain multiple descriptors
 				if 'all_data' in key:
 					# This file might contain multiple types of data
@@ -2214,20 +2828,24 @@ def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
 										descriptor_df['duration'] = 0
 
 									activity_type_dfs.append(descriptor_df)
-								elif any(d.lower() == descriptor.lower() for d in heartrate_descriptors):
-									heartrate_dfs.append(descriptor_df)
+
 			except (IndexError, ValueError) as e:
 				logger.warning(f"Error extracting user ID from key {key}: {e}")
 				# If we can't extract user_id, check if this is still activity data
 				if any(descriptor.lower() in key.lower() for descriptor in movement_descriptors):
 					activity_type_dfs.append(data)
-				elif any(descriptor.lower() in key.lower() for descriptor in heartrate_descriptors):
-					heartrate_dfs.append(data)
+
 
 
 	if activity_type_dfs:
 		# Combine all activity type dataframes
 		all_activity_types = pd.concat(activity_type_dfs, ignore_index=True)
+
+		# Add engagement classification
+		all_activity_types = classify_user_engagement(all_activity_types)
+
+		# Analyze engagement patterns
+		analyze_engagement_patterns(all_activity_types)
 
 		# Generate descriptive statistics for activity types data
 		generate_descriptive_stats(all_activity_types, "Activity Types Data", None)
@@ -2241,7 +2859,7 @@ def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
 		type_counts = all_activity_types['type'].value_counts()
 
 		def plot_movement_type_distribution():
-			type_counts.plot(kind='pie', autopct='%1.1f%%')
+			type_counts.plot(kind='pie', autopct='%1.1f%%', colormap=PIE_COLORMAP)
 			plt.title('Distribution of Movement Types')
 			plt.ylabel('')
 
@@ -2348,7 +2966,7 @@ def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
 
 			# Create a simple trend visualization of steps
 			plt.figure(figsize=(12, 6))
-			sns.histplot(all_activity_types['steps'], kde=True)
+			sns.histplot(all_activity_types['steps'], kde=True, palette=HISTOGRAM_COLORMAP)
 			plt.title('Distribution of Steps')
 			plt.xlabel('Number of Steps')
 			plt.ylabel('Number of Activities')
@@ -2444,7 +3062,7 @@ def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
 
 			# Create a simple trend visualization of calories burned
 			plt.figure(figsize=(12, 6))
-			sns.histplot(all_activity_types['cals'], kde=True)
+			sns.histplot(all_activity_types['cals'], kde=True, palette=HISTOGRAM_COLORMAP)
 			plt.title('Distribution of Calories Burned')
 			plt.xlabel('Calories Burned')
 			plt.ylabel('Number of Activities')
@@ -2471,7 +3089,7 @@ def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
 
 				# Create a pie chart of provider distribution
 				plt.figure(figsize=(12, 6))
-				provider_counts.plot(kind='pie', autopct='%1.1f%%')
+				provider_counts.plot(kind='pie', autopct='%1.1f%%', colormap=PIE_COLORMAP)
 				plt.title('Distribution of Activities by Provider/Source')
 				plt.ylabel('')
 				plt.tight_layout()
@@ -2531,191 +3149,7 @@ def analyze_user_data(json_data, campaign_start=None, campaign_end=None):
 		plot_activity_providers()
 
 
-	if heartrate_dfs:
-		try:
-			# Combine all heartrate dataframes
-			all_heartrates = pd.concat(heartrate_dfs, ignore_index=True)
-
-			# Map columns to expected names if they don't exist
-			# Check for heart rate data in various possible column names
-			heart_rate_column_candidates = ['heartRate', 'HEARTBEAT', 'HEART_RATE', 'heart_rate', 'VALENCE_STATE_VALUE']
-			timestamp_column_candidates = ['timestamp', 'EVENT_TIMESTAMP', 'time', 'date']
-			activity_id_column_candidates = ['activity_id', 'id', 'activityId']
-
-			# Find heart rate column
-			heart_rate_column = None
-			for col in heart_rate_column_candidates:
-				if col in all_heartrates.columns:
-					if heart_rate_column is None:  # Only use the first match
-						heart_rate_column = col
-						logger.info(f"Using '{col}' as heart rate column")
-						# Map to expected column name if it's not already 'heartRate'
-						if col != 'heartRate':
-							all_heartrates['heartRate'] = all_heartrates[col]
-
-			# Find timestamp column
-			timestamp_column = None
-			for col in timestamp_column_candidates:
-				if col in all_heartrates.columns:
-					if timestamp_column is None:  # Only use the first match
-						timestamp_column = col
-						logger.info(f"Using '{col}' as timestamp column")
-						# Map to expected column name if it's not already 'timestamp'
-						if col != 'timestamp':
-							all_heartrates['timestamp'] = all_heartrates[col]
-
-			# Find activity ID column
-			activity_id_column = None
-			for col in activity_id_column_candidates:
-				if col in all_heartrates.columns:
-					if activity_id_column is None:  # Only use the first match
-						activity_id_column = col
-						logger.info(f"Using '{col}' as activity ID column")
-						# Map to expected column name if it's not already 'activity_id'
-						if col != 'activity_id':
-							all_heartrates['activity_id'] = all_heartrates[col]
-
-			# If we don't have an activity_id column, create one using user_id if available
-			if activity_id_column is None and 'user_id' in all_heartrates.columns:
-				logger.info("Creating activity_id column from user_id")
-				all_heartrates['activity_id'] = all_heartrates['user_id']
-				activity_id_column = 'activity_id'
-
-			# Generate descriptive statistics for heart rate data if we have the required columns
-			if 'heartRate' in all_heartrates.columns:
-				# Create a copy to avoid modifying the original dataframe
-				hr_stats_df = all_heartrates.copy()
-
-				# Convert timestamp to datetime for better analysis
-				if 'timestamp' in hr_stats_df.columns:
-					try:
-						# Try to convert timestamp to datetime, handling different formats
-						if hr_stats_df['timestamp'].dtype == 'object':
-							# Try parsing as string
-							hr_stats_df['timestamp'] = pd.to_datetime(hr_stats_df['timestamp'])
-						else:
-							# Try parsing as numeric (milliseconds or seconds)
-							# First check if values are likely milliseconds (large numbers)
-							sample_value = hr_stats_df['timestamp'].iloc[0] if len(hr_stats_df) > 0 else 0
-							if sample_value > 1e10:  # Likely milliseconds
-								hr_stats_df['timestamp'] = pd.to_datetime(hr_stats_df['timestamp'], unit='ms')
-							else:  # Likely seconds
-								hr_stats_df['timestamp'] = pd.to_datetime(hr_stats_df['timestamp'], unit='s')
-
-						hr_stats_df['hour_of_day'] = hr_stats_df['timestamp'].dt.hour
-
-						# Generate descriptive statistics for heart rate data
-						generate_descriptive_stats(hr_stats_df, "Heart Rate Data", None)
-
-						# Perform bivariate analysis on heart rate data
-						perform_bivariate_analysis(hr_stats_df, "Heart Rate Data", None)
-					except Exception as e:
-						logger.error(f"Error converting timestamp to datetime: {e}")
-
-				# 6. Heart rate distribution
-				# This visualization shows the overall distribution of heart rate measurements
-				# Helps understand the range and frequency of different heart rates across all users
-				def plot_heart_rate_distribution():
-					sns.histplot(all_heartrates['heartRate'].dropna(), kde=True)
-					plt.title('Distribution of Heart Rates')
-					plt.xlabel('Heart Rate (bpm)')
-					plt.ylabel('Frequency')
-
-				create_and_save_figure(
-					plot_heart_rate_distribution,
-					os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'heart_rate_distribution.png'),
-					figsize=(10, 6)
-				)
-
-				# 7. Heart rate over time for a sample of data
-				# This visualization shows how heart rate changes over time for a specific activity
-				# Helps identify patterns, peaks, and recovery periods during activities
-				if len(all_heartrates) > 0 and 'activity_id' in all_heartrates.columns:
-					try:
-						# Take a sample of one player's data
-						activity_counts = all_heartrates['activity_id'].value_counts()
-						if not activity_counts.empty:
-							sample_player = activity_counts.index[0]
-							sample_data = all_heartrates[all_heartrates['activity_id'] == sample_player]
-
-							# Sort by timestamp if available
-							if 'timestamp' in sample_data.columns:
-								sample_data = sample_data.sort_values('timestamp')
-
-							if 'timestamp' in sample_data.columns and len(sample_data) > 0:
-								try:
-									# Convert timestamp to datetime if it's not already
-									if not pd.api.types.is_datetime64_any_dtype(sample_data['timestamp']):
-										# Try parsing as numeric (milliseconds or seconds)
-										# First check if values are likely milliseconds (large numbers)
-										sample_value = sample_data['timestamp'].iloc[0] if len(sample_data) > 0 else 0
-										if sample_value > 1e10:  # Likely milliseconds
-											sample_data['timestamp'] = pd.to_datetime(sample_data['timestamp'], unit='ms')
-										else:  # Likely seconds
-											sample_data['timestamp'] = pd.to_datetime(sample_data['timestamp'], unit='s')
-
-									def plot_heart_rate_over_time():
-										plt.plot(sample_data['timestamp'], sample_data['heartRate'])
-										plt.title(f'Heart Rate Over Time for Activity {sample_player}')
-										plt.xlabel('Time')
-										plt.ylabel('Heart Rate (bpm)')
-
-									create_and_save_figure(
-										plot_heart_rate_over_time,
-										os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'heart_rate_over_time.png'),
-										figsize=(14, 7)
-									)
-								except Exception as e:
-									logger.error(f"Error plotting heart rate over time: {e}")
-						else:
-							logger.warning("No activity IDs found in heart rate data")
-					except Exception as e:
-						logger.error(f"Error processing heart rate over time: {e}")
-
-				# 8. Heart rate by hour of day (Bivariate Analysis)
-				# This visualization shows how heart rate varies by hour of day
-				# Helps identify daily patterns in heart rate
-				if len(all_heartrates) > 10:  # Only if we have enough data
-					try:
-						# Convert timestamp to datetime if it's not already
-						if 'timestamp' in all_heartrates.columns:
-							if not pd.api.types.is_datetime64_any_dtype(all_heartrates['timestamp']):
-								# Try parsing as numeric (milliseconds or seconds)
-								# First check if values are likely milliseconds (large numbers)
-								sample_value = all_heartrates['timestamp'].iloc[0] if len(all_heartrates) > 0 else 0
-								if sample_value > 1e10:  # Likely milliseconds
-									all_heartrates['timestamp'] = pd.to_datetime(all_heartrates['timestamp'], unit='ms')
-								else:  # Likely seconds
-									all_heartrates['timestamp'] = pd.to_datetime(all_heartrates['timestamp'], unit='s')
-
-							all_heartrates['hour'] = all_heartrates['timestamp'].dt.hour
-
-							def plot_heart_rate_by_hour():
-								sns.boxplot(data=all_heartrates, x='hour', y='heartRate')
-								plt.title('Heart Rate by Hour of Day')
-								plt.xlabel('Hour of Day')
-								plt.ylabel('Heart Rate (bpm)')
-								plt.xticks(range(0, 24))
-
-							create_and_save_figure(
-								plot_heart_rate_by_hour,
-								os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'heart_rate_by_hour.png'),
-								figsize=(12, 6)
-							)
-
-							# Calculate statistics by hour
-							hr_by_hour = all_heartrates.groupby('hour')['heartRate'].agg(['mean', 'std', 'count'])
-							# Round mean and std values to 2 decimal places
-							hr_by_hour['mean'] = hr_by_hour['mean'].round(2)
-							hr_by_hour['std'] = hr_by_hour['std'].round(2)
-					except Exception as e:
-						logger.error(f"Error plotting heart rate by hour: {e}")
-			else:
-				logger.warning("No heart rate column found in the data")
-		except Exception as e:
-			logger.error(f"Error processing heart rate data: {e}")
-
-def generate_analysis_report(csv_data, json_data, activities, usage_metrics, campaign_metrics, dropout_metrics):
+def generate_analysis_report(csv_data, json_data, activities, usage_metrics, campaign_metrics, dropout_metrics, joining_metrics=None):
 	"""
     Generate a report of which analyses were performed and which weren't, with reasons.
 
@@ -2726,6 +3160,7 @@ def generate_analysis_report(csv_data, json_data, activities, usage_metrics, cam
         usage_metrics: Dictionary of usage metrics
         campaign_metrics: Dictionary of campaign metrics
         dropout_metrics: Dictionary of dropout metrics
+        joining_metrics: Dictionary of joining metrics
 
     Returns:
         None
@@ -2782,6 +3217,16 @@ def generate_analysis_report(csv_data, json_data, activities, usage_metrics, cam
 				f.write(f"   - Reason: {reason}\n")
 				skipped_analyses.append(("User dropout analysis", reason))
 
+			# Check if joining analysis was performed
+			if joining_metrics:
+				f.write("✓ User joining rates analysis performed\n")
+				performed_analyses.append("User joining rates analysis")
+			else:
+				reason = "Insufficient activity data or missing campaign start date to calculate joining rates"
+				f.write("✗ User joining rates analysis NOT performed\n")
+				f.write(f"   - Reason: {reason}\n")
+				skipped_analyses.append(("User joining rates analysis", reason))
+
 			# Check if campaign metrics analysis was performed
 			if campaign_metrics:
 				f.write("✓ Campaign metrics analysis performed\n")
@@ -2804,7 +3249,6 @@ def generate_analysis_report(csv_data, json_data, activities, usage_metrics, cam
 
 			# Check if user data contains specific types of data
 			has_movement_data = False
-			has_heart_rate_data = False
 
 			# First check if any filenames contain movement descriptors
 			movement_descriptors = ['walk', 'run', 'cycle', 'bike']
@@ -2821,8 +3265,6 @@ def generate_analysis_report(csv_data, json_data, activities, usage_metrics, cam
 						for activity in user_data['activities']:
 							if activity.get('gameDescriptor') in ['WALK', 'RUN', 'CYCLE']:
 								has_movement_data = True
-							if activity.get('gameDescriptor') == 'HEART_RATE':
-								has_heart_rate_data = True
 
 			if has_movement_data:
 				f.write("✓ Movement data analysis performed (steps, calories, etc.)\n")
@@ -2832,15 +3274,6 @@ def generate_analysis_report(csv_data, json_data, activities, usage_metrics, cam
 				f.write("✗ Movement data analysis NOT performed\n")
 				f.write(f"   - Reason: {reason}\n")
 				skipped_analyses.append(("Movement data analysis", reason))
-
-			if has_heart_rate_data:
-				f.write("✓ Heart rate data analysis performed\n")
-				performed_analyses.append("Heart rate data analysis")
-			else:
-				reason = "No heart rate data found in user activities"
-				f.write("✗ Heart rate data analysis NOT performed\n")
-				f.write(f"   - Reason: {reason}\n")
-				skipped_analyses.append(("Heart rate data analysis", reason))
 
 		else:
 			reason = "No JSON user data available"
@@ -2881,18 +3314,30 @@ def generate_analysis_report(csv_data, json_data, activities, usage_metrics, cam
 			f.write("\nVisualizations:\n")
 
 			# Group visualizations by type
-			activity_viz = [v for v in visualization_files if v.startswith('activity_')]
-			user_viz = [v for v in visualization_files if v.startswith('user_')]
-			movement_viz = [v for v in visualization_files if 'steps' in v or 'calories' in v or 'movement' in v]
-			dropout_viz = [v for v in visualization_files if 'dropout' in v]
-			other_viz = [v for v in visualization_files if not any([
+			# First identify combined visualizations
+			combined_viz = [v for v in visualization_files if 'combined' in v]
+
+			# Then group the rest, excluding combined visualizations
+			remaining_viz = [v for v in visualization_files if v not in combined_viz]
+			activity_viz = [v for v in remaining_viz if v.startswith('activity_')]
+			user_viz = [v for v in remaining_viz if v.startswith('user_')]
+			movement_viz = [v for v in remaining_viz if 'steps' in v or 'calories' in v or 'movement' in v]
+			dropout_viz = [v for v in remaining_viz if 'dropout' in v]
+			joining_viz = [v for v in remaining_viz if 'joining' in v]
+			other_viz = [v for v in remaining_viz if not any([
 				v.startswith('activity_'),
 				v.startswith('user_'),
 				'steps' in v,
 				'calories' in v,
 				'movement' in v,
-				'dropout' in v
+				'dropout' in v,
+				'joining' in v
 			])]
+
+			if combined_viz:
+				f.write("  Combined Metrics Analysis:\n")
+				for viz in combined_viz:
+					f.write(f"  - {viz}\n")
 
 			if activity_viz:
 				f.write("  Activity Analysis:\n")
@@ -2913,6 +3358,11 @@ def generate_analysis_report(csv_data, json_data, activities, usage_metrics, cam
 			if dropout_viz:
 				f.write("  Dropout Analysis:\n")
 				for viz in dropout_viz:
+					f.write(f"  - {viz}\n")
+
+			if joining_viz:
+				f.write("  Joining Rates Analysis:\n")
+				for viz in joining_viz:
 					f.write(f"  - {viz}\n")
 
 			if other_viz:
@@ -2966,11 +3416,12 @@ def create_complete_report(csv_data, json_data, activities=None):
 	# Extract metrics from activities if available
 	usage_metrics = None
 	dropout_metrics = None
+	joining_metrics = None
 	campaign_metrics = None
 
-	if activities is not None and isinstance(activities, tuple) and len(activities) >= 5:
+	if activities is not None and isinstance(activities, tuple) and len(activities) >= 6:
 		# If activities is a tuple returned from analyze_activities
-		activities_df, _, usage_metrics, dropout_metrics, campaign_metrics = activities
+		activities_df, _, usage_metrics, dropout_metrics, joining_metrics, campaign_metrics = activities
 	else:
 		activities_df = activities
 
@@ -2980,7 +3431,7 @@ def create_complete_report(csv_data, json_data, activities=None):
 	dest_file = os.path.join(data_analysis_dir, 'analysis_report.txt')
 
 	# Generate the report using the current data
-	generate_analysis_report(csv_data, json_data, activities_df, usage_metrics, campaign_metrics, dropout_metrics)
+	generate_analysis_report(csv_data, json_data, activities_df, usage_metrics, campaign_metrics, dropout_metrics, joining_metrics)
 
 	return dest_file
 
@@ -3026,7 +3477,7 @@ def main():
 			logger.info("Analyzing activities data...")
 			result = analyze_activities(csv_data, json_data)
 			if result:
-				activities, unique_users_count, usage_metrics, dropout_metrics, campaign_metrics = result
+				activities, unique_users_count, usage_metrics, dropout_metrics, joining_metrics, campaign_metrics = result
 				logger.info(f"Activities analysis complete: {unique_users_count} users")
 			else:
 				logger.warning("Activities analysis returned no results")
@@ -3034,6 +3485,7 @@ def main():
 				unique_users_count = 0
 				usage_metrics = None
 				dropout_metrics = None
+				joining_metrics = None
 				campaign_metrics = None
 		except Exception as e:
 			logger.error(f"Error analyzing activities data: {e}")
@@ -3041,6 +3493,7 @@ def main():
 			unique_users_count = 0
 			usage_metrics = None
 			dropout_metrics = None
+			joining_metrics = None
 			campaign_metrics = None
 
 		# Analyze user data
@@ -3054,6 +3507,14 @@ def main():
 			logger.info("User data analysis complete")
 		except Exception as e:
 			logger.error(f"Error analyzing user data: {e}")
+
+		# Analyze visualizations, challenges, and tasks
+		try:
+			logger.info("Analyzing visualizations, challenges, and tasks...")
+			analyze_visualizations_challenges_tasks(csv_data)
+			logger.info("Visualizations, challenges, and tasks analysis complete")
+		except Exception as e:
+			logger.error(f"Error analyzing visualizations, challenges, and tasks: {e}")
 
 		# Generate analysis report
 		try:
@@ -3119,6 +3580,15 @@ def main():
 			except (KeyError, TypeError) as e:
 				logger.error(f"Error accessing dropout metrics: {e}")
 
+		if joining_metrics:
+			try:
+				print(f"- User Joining Rates (days between campaign start and first activity):")
+				print(f"  * Average joining time: {joining_metrics['avg_joining_days']:.0f} days")
+				print(f"  * Median joining time: {joining_metrics['median_joining_days']:.0f} days")
+				print(f"  * Range: {joining_metrics['min_joining_days']:.0f} to {joining_metrics['max_joining_days']:.0f} days")
+			except (KeyError, TypeError) as e:
+				logger.error(f"Error accessing joining metrics: {e}")
+
 	except Exception as e:
 		logger.error(f"Unexpected error in main function: {e}")
 		print(f"An error occurred during analysis. See log file for details.")
@@ -3130,7 +3600,6 @@ def main():
 	print("\nVisualization categories:")
 	print(f"   - Activities Analysis: {OUTPUT_VISUALIZATIONS_DIR}/activity_*.png")
 	print(f"   - User Engagement: {OUTPUT_VISUALIZATIONS_DIR}/user_*.png, {OUTPUT_VISUALIZATIONS_DIR}/*_usage_*.png")
-	print(f"   - User Data: {OUTPUT_VISUALIZATIONS_DIR}/movement_*.png, {OUTPUT_VISUALIZATIONS_DIR}/heart_rate_*.png")
 
 	print("\nFor a complete list of generated visualizations, check the log file or the visualizations directory.")
 

@@ -20,7 +20,9 @@ os.makedirs(RAW_DATA_DIR, exist_ok=True)
 
 # Constants
 DEFAULT_NUM_USERS = 10  # Default number of users if users.xlsx is not found
-NUM_DATA_POINTS = 5     # Number of data points to generate for each game descriptor
+NUM_DATA_POINTS = 20    # Number of data points to generate for each game descriptor
+# Time span for generated data (in days)
+TIME_SPAN_DAYS = 90     # Generate data spanning 90 days
 
 def load_property_schemes() -> Tuple[Dict[str, List[str]], Dict[str, Dict[str, Any]]]:
     """
@@ -104,11 +106,11 @@ def generate_random_value(param_name: str, property_details: Dict[str, Dict[str,
             return random.randint(1, 1000)
 
         elif prop_type == 'DATETIME':
-            # Generate a random date/time in the past year
-            days_ago = random.randint(0, 365)
-            hours_ago = random.randint(0, 24)
-            minutes_ago = random.randint(0, 60)
-            seconds_ago = random.randint(0, 60)
+            # Generate a random date/time within the specified time span
+            days_ago = random.randint(0, TIME_SPAN_DAYS)
+            hours_ago = random.randint(0, 23)
+            minutes_ago = random.randint(0, 59)
+            seconds_ago = random.randint(0, 59)
 
             dt = datetime.datetime.now() - datetime.timedelta(
                 days=days_ago, 
@@ -127,11 +129,11 @@ def generate_random_value(param_name: str, property_details: Dict[str, Dict[str,
         return ''.join(random.choices(string.ascii_letters + string.digits, k=random.randint(10, 30)))
 
     elif "TIMESTAMP" in param_name or "DATE" in param_name:
-        # Generate a random date/time in the past year
-        days_ago = random.randint(0, 365)
-        hours_ago = random.randint(0, 24)
-        minutes_ago = random.randint(0, 60)
-        seconds_ago = random.randint(0, 60)
+        # Generate a random date/time within the specified time span
+        days_ago = random.randint(0, TIME_SPAN_DAYS)
+        hours_ago = random.randint(0, 23)
+        minutes_ago = random.randint(0, 59)
+        seconds_ago = random.randint(0, 59)
 
         dt = datetime.datetime.now() - datetime.timedelta(
             days=days_ago, 
@@ -267,6 +269,10 @@ def generate_random_value(param_name: str, property_details: Dict[str, Dict[str,
         actions = ["RECEIVED", "READ", "CLICKED", "DISMISSED"]
         return random.choice(actions)
 
+    elif "ERROR" in param_name:
+        # Error margin (for geofence data)
+        return round(random.uniform(0.1, 10.0), 2)
+
     # Default case: generate a random integer
     return random.randint(1, 100)
 
@@ -288,10 +294,62 @@ def generate_data_for_game_descriptor(game_descriptor: str, params_comment: str,
 
     # Generate multiple data points for this game descriptor
     data_points = []
-    for _ in range(NUM_DATA_POINTS):
+
+    # Calculate how many data points of each type to generate
+    regular_points = int(NUM_DATA_POINTS * 0.7)  # 70% regular data
+    missing_value_points = int(NUM_DATA_POINTS * 0.1)  # 10% with missing values
+    extreme_value_points = int(NUM_DATA_POINTS * 0.1)  # 10% with extreme values
+    special_char_points = int(NUM_DATA_POINTS * 0.1)  # 10% with special characters
+
+    # Ensure we generate at least the requested number of data points
+    total_points = regular_points + missing_value_points + extreme_value_points + special_char_points
+    if total_points < NUM_DATA_POINTS:
+        regular_points += (NUM_DATA_POINTS - total_points)
+
+    # Generate regular data points
+    for _ in range(regular_points):
         data_point = {}
         for param in params:
             data_point[param] = generate_random_value(param, property_details)
+        data_points.append(data_point)
+
+    # Generate data points with missing values
+    for _ in range(missing_value_points):
+        data_point = {}
+        for param in params:
+            # Randomly skip some parameters (20% chance)
+            if random.random() > 0.2:
+                data_point[param] = generate_random_value(param, property_details)
+        data_points.append(data_point)
+
+    # Generate data points with extreme values
+    for _ in range(extreme_value_points):
+        data_point = {}
+        for param in params:
+            # For numeric parameters, sometimes use extreme values
+            if "DURATION" in param or "DISTANCE" in param or "STEPS" in param or "SPEED" in param or "KCAL" in param:
+                if random.random() > 0.5:
+                    # Use an extreme value (very high)
+                    data_point[param] = random.randint(100000, 1000000)
+                else:
+                    data_point[param] = generate_random_value(param, property_details)
+            else:
+                data_point[param] = generate_random_value(param, property_details)
+        data_points.append(data_point)
+
+    # Generate data points with special characters
+    for _ in range(special_char_points):
+        data_point = {}
+        for param in params:
+            if "DESCRIPTION" in param or "SECRET" in param:
+                if random.random() > 0.5:
+                    # Use special characters
+                    special_chars = "!@#$%^&*()_+-=[]{}|;':\",./<>?\\`~"
+                    data_point[param] = ''.join(random.choices(string.ascii_letters + string.digits + special_chars, k=random.randint(10, 30)))
+                else:
+                    data_point[param] = generate_random_value(param, property_details)
+            else:
+                data_point[param] = generate_random_value(param, property_details)
         data_points.append(data_point)
 
     return data_points
@@ -432,7 +490,7 @@ def main():
         "PLAN_MEAL": "NR_DAYS, NR_MEALS, MEAL_PLAN_JS",
         "NUTRITION_SUMMARY": "AGGREGATION_LEVEL, SUMMARY_SCORE, CARBS_CONFORMANCE, FAT_CONFORMANCE, FIBER_CONFORMANCE",
         "NUTRITION_DIARY_VID": "DESCRIPTION, IS_COMPLIANT, REF_TO_MEAL_PLAN, MEAL_TOTAL_WEIGHT_ESTIMATED_G, MEAL_CARB_WEIGHT_ESTIMATED_G, VIDEO",
-        "GEOFENCE": "LATITUDE, LONGITUDE, ALTIDUDE, SPEED, ERROR, TIMESTAMP"
+        "GEOFENCE": "LATITUDE, LONGITUDE, ALTITUDE, SPEED, ERROR, TIMESTAMP"
     }
 
     # Use property schemes from Excel if available, otherwise use hardcoded params
@@ -447,14 +505,21 @@ def main():
             game_descriptor_params[game_descriptor] = hardcoded_params[game_descriptor]
             print(f"Using hardcoded parameters for {game_descriptor}")
         else:
-            # Skip this game descriptor
-            print(f"No parameters found for {game_descriptor}, skipping")
-            continue
+            # For game descriptors without defined parameters, use a default set of parameters
+            default_params = "SECRET, DESCRIPTION, DURATION, TIMESTAMP"
+            game_descriptor_params[game_descriptor] = default_params
+            print(f"No parameters found for {game_descriptor}, using default parameters: {default_params}")
 
     print(f"Defined parameters for {len(game_descriptor_params)} game descriptors")
 
     # Use campaign user IDs for filenames if available
     filename_user_ids = campaign_user_ids if campaign_user_ids else user_ids
+
+    # Ensure user ID 107 is included for the example geofence data
+    if 107 not in filename_user_ids:
+        filename_user_ids.append(107)
+        print(f"Added user ID 107 for example geofence data")
+
     print(f"Using {len(filename_user_ids)} unique user IDs from campaign_data.xlsx for filenames")
 
     # Generate data for each filename user ID
@@ -482,6 +547,15 @@ def main():
                 json.dump(data_points, json_file, indent=4)
 
             print(f"  Saved {len(data_points)} data points to {file_path}")
+
+        # Create an all_data file that combines data from all game descriptors
+        all_data_file_name = f"user_{filename_user_id}_all_data.json"
+        all_data_file_path = os.path.join(RAW_DATA_DIR, all_data_file_name)
+
+        with open(all_data_file_path, 'w') as json_file:
+            json.dump(user_data, json_file, indent=4)
+
+        print(f"  Saved combined data for all game descriptors to {all_data_file_path}")
 
     print("Data generation complete!")
 

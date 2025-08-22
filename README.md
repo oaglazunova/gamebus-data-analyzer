@@ -59,8 +59,36 @@ The tool provides various analyses including:
 - Movement types and physical activity statistics
 - Challenge completion rates
 - Heart rate data analysis (when available)
+- Frequency, timing, and type of tasks completed
+- Completion rates by activity type/task (e.g., walking, fruit intake)
 
 See the documentation in `src/analysis/data_analysis.py` for details on specific analyses.
+
+### Activity Type by Day: data source
+
+The heatmap saved as `activity_type_by_day.png` is built from the activities DataFrame loaded from `config/campaign_data.xlsx` (sheet name: `activities`). The loader (`load_excel_files` in `src/analysis/data_analysis.py`) reads that sheet into `csv_data['activities']`, which is then copied to `activities_df` inside `analyze_visualizations_challenges_tasks` to compute per-hour/day aggregations and the heatmap.
+
+## Data fields: challenge_id and challenge_name
+
+These two fields are used in reports/plots about challenge participation and completion. They come from two data sources during analysis:
+
+- Primary (from activities): For each activity, we parse the rewardedParticipations column (a JSON-like string) into a list of reward dicts. From each reward we try to extract:
+  - challenge_id from one of these keys: challengeId, challenge_id, challenge, cid, or id
+  - challenge_name from one of these keys: challengeName, name, or label
+  This parsing is done by extract_detailed_rewards in src/analysis/data_analysis.py and then processed in the analysis flow that builds completion_records.
+
+- Secondary (from campaign description): If an ID is missing but we have a name, we map the name to the desc_challenges sheet (campaign_desc.xlsx → desc_challenges) to recover the numeric id. We also use desc_challenges to attach the official challenge name when available.
+
+In summary, challenge_id primarily originates from each reward in activities.rewardedParticipations, and challenge_name is taken from that same reward object when present; otherwise they are completed by looking up id/name in the desc_challenges sheet.
+
+## Data fields: tasks (source)
+
+Tasks used in the analyses come from the campaign description Excel file and are loaded as a DataFrame named desc_tasks:
+
+- Source file and sheet: config/campaign_desc.xlsx → sheet named "tasks". When loaded by the tool, all sheets from campaign_desc.xlsx are prefixed with desc_, therefore the tasks sheet becomes desc_tasks.
+- Where it is loaded: In src/analysis/data_analysis.py, load_excel_files reads campaign_desc.xlsx and maps each sheet to csv_data with the desc_ prefix. Later, analyze_visualizations_challenges_tasks accesses tasks via tasks_df = csv_data['desc_tasks'].
+- Typical fields: task id, challenge (foreign key to desc_challenges.id), name/label, points, timing/constraints depending on your campaign file.
+- How tasks are used: The analyzer uses desc_tasks to summarize counts and points, and to relate tasks to their parent challenges and visualizations. Some sections also infer "completed tasks" patterns directly from activities (e.g., activity type, rewardedParticipations) for ranking and timing plots, but the canonical definitions and metadata of tasks originate from desc_tasks.
 
 ## Configuration
 
@@ -139,3 +167,10 @@ This project is licensed under the MIT License.
 ## Acknowledgments
 
 - GameBus platform for providing the API
+
+
+## FAQ
+
+### What is the difference between points_by_activity_type and rewards_by_activity_type?
+- points_by_activity_type: Sums the rewarded points across all activities of each type. This shows which activity types contributed the most total points overall (SUM per type).
+- rewards_by_activity_type: Averages the rewarded points per activity instance, grouped by type. This shows how many points are typically awarded when a given activity type occurs (MEAN per type).

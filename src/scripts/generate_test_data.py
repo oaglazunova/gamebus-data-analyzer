@@ -22,7 +22,7 @@ os.makedirs(RAW_DATA_DIR, exist_ok=True)
 DEFAULT_NUM_USERS = 10  # Default number of users if users.xlsx is not found
 NUM_DATA_POINTS = 20    # Number of data points to generate for each game descriptor
 # Time span for generated data (in days)
-TIME_SPAN_DAYS = 90     # Generate data spanning 90 days
+TIME_SPAN_DAYS = 30
 
 def load_property_schemes() -> Tuple[Dict[str, List[str]], Dict[str, Dict[str, Any]]]:
     """

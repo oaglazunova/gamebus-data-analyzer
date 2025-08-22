@@ -367,6 +367,64 @@ class AllDataCollector:
         logger.info(f"Extracted {len(metadata_list)} metadata items for {data_type}")
         return metadata_list
 
+    def _format_dates_in_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert any date-like fields in an item to a readable string format.
+        Rules:
+        - Keys containing DATE, TIME, TIMESTAMP, or ending with _AT are treated as date-like.
+        - Numeric values are interpreted as epoch ms if >= 1e12, else epoch seconds if >= 1e9.
+        - Digit-only strings of length 13 or 10 are treated similarly.
+        - ISO 8601 strings are normalized to 'YYYY-MM-DD HH:MM:SS' when key looks date-like.
+        """
+        def is_date_like(key: str) -> bool:
+            k = (key or "").upper()
+            return ("DATE" in k) or ("TIME" in k) or ("TIMESTAMP" in k) or k.endswith("_AT")
+
+        def to_readable(dt: datetime.datetime) -> str:
+            try:
+                return dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return dt.isoformat(sep=" ")
+
+        def convert_value(key: str, value: Any) -> Any:
+            if not is_date_like(key):
+                return value
+            # Numeric epochs
+            try:
+                if isinstance(value, (int, float)):
+                    # Heuristic: ms vs s
+                    if value >= 1e12:  # milliseconds
+                        return to_readable(datetime.datetime.fromtimestamp(value / 1000))
+                    if value >= 1e9:   # seconds
+                        return to_readable(datetime.datetime.fromtimestamp(value))
+                    # Very small numbers likely not timestamps; leave as-is
+                    return value
+                # Digit-only strings
+                if isinstance(value, str):
+                    v = value.strip()
+                    if v.isdigit():
+                        if len(v) >= 13:
+                            return to_readable(datetime.datetime.fromtimestamp(int(v[:13]) / 1000))
+                        if len(v) == 10:
+                            return to_readable(datetime.datetime.fromtimestamp(int(v)))
+                    # Try ISO 8601 parsing
+                    try:
+                        # Replace Z with +00:00 for fromisoformat compatibility
+                        iso_v = v.replace("Z", "+00:00")
+                        dt = datetime.datetime.fromisoformat(iso_v)
+                        return to_readable(dt)
+                    except Exception:
+                        return value
+            except Exception:
+                return value
+            return value
+
+        # Create a new dict with formatted values where applicable
+        formatted = {}
+        for k, v in item.items():
+            formatted[k] = convert_value(k, v)
+        return formatted
+
     def create_user_email_mapping(self) -> str:
         """
         Create a txt file mapping user ID to email.
@@ -430,11 +488,13 @@ class AllDataCollector:
         # Fields to exclude from JSON files
         excluded_fields = ["X_GAME_DESCRIPTOR", "X_GAME_DESCRIPTOR_ID", "X_PLAYER_ID", "X_PROPERTY_KEYS"]
 
-        # Filter out excluded fields from each data point
+        # Filter out excluded fields from each data point and format dates
         filtered_data = []
         for item in data:
             filtered_item = {k: v for k, v in item.items() if k not in excluded_fields}
-            filtered_data.append(filtered_item)
+            # Ensure all date-like fields are formatted to a readable format
+            formatted_item = self._format_dates_in_item(filtered_item)
+            filtered_data.append(formatted_item)
 
         # Save filtered data to JSON file
         try:

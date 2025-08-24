@@ -54,7 +54,6 @@ class AllDataCollector:
             - Dictionary of data points by type
             - List of paths to the saved JSON files
         """
-        logger.info(f"Collecting all data for user {self.user_id}")
 
         results = {}
         file_paths = []
@@ -71,14 +70,12 @@ class AllDataCollector:
 
         # Try to collect data for each data type
         for data_type, config in self.data_configs.items():
-            logger.info(f"Collecting {data_type} data for user {self.user_id}")
             try:
                 # Get the game descriptor and property key for this data type
                 game_descriptor = config['game_descriptor']
                 property_key = config['property_key']
 
                 # Get data from the API
-                logger.info(f"Collecting {data_type} data for user {self.user_id}")
                 raw_data, actual_game_descriptor, raw_responses = self.client.get_user_data(self.token, self.user_id, game_descriptor, try_all_descriptors=True)
 
                 # Add raw responses to the collection for later use
@@ -87,10 +84,6 @@ class AllDataCollector:
                 if not raw_data:
                     logger.warning(f"No {data_type} data found for user {self.user_id}")
                     continue
-
-                # Log the actual game descriptor used
-                if actual_game_descriptor != game_descriptor:
-                    logger.info(f"Using actual game descriptor '{actual_game_descriptor}' instead of requested '{game_descriptor}'")
 
                 # Parse the data
                 parsed_data = self.parse_data(raw_data, actual_game_descriptor, property_key)
@@ -113,24 +106,11 @@ class AllDataCollector:
 
                     if file_path:
                         file_paths.append(file_path)
-                        logger.info(f"Collected {len(parsed_data)} {data_type} data points (game descriptor: {actual_game_descriptor}), saved to {file_path}")
-                    else:
-                        logger.warning(f"Collected {len(parsed_data)} {data_type} data points (game descriptor: {actual_game_descriptor}), but no file was created")
                 else:
                     logger.warning(f"No {data_type} data collected for user {self.user_id}")
             except Exception as e:
                 logger.error(f"Failed to collect {data_type} data for user {self.user_id}: {e}")
                 logger.exception(e)  # Log the full exception traceback
-
-        # No longer saving all data to a single file as per requirements
-        if results:
-            logger.info("Skipping creation of all_data.json file as per requirements")
-        else:
-            logger.warning(f"No data collected for user {self.user_id}")
-
-        # Metadata extraction is still performed, but files are not saved as per requirements
-        if all_metadata:
-            logger.info(f"Extracted metadata for {len(all_metadata)} data types, but not saving to files as per requirements")
 
         # Save all raw responses to a single file
         if all_raw_responses:
@@ -155,7 +135,7 @@ class AllDataCollector:
                         json.dump(parsed_responses, json_file, indent=4)
 
                     file_paths.append(all_raw_file_path)
-                    logger.info(f"Saved {len(parsed_responses)} raw JSON responses to {all_raw_file_path}")
+
             except Exception as e:
                 logger.error(f"Failed to save all raw JSON responses to file: {e}")
                 logger.exception(e)  # Log the full exception traceback
@@ -183,11 +163,9 @@ class AllDataCollector:
             data_point_gd = data_point.get("gameDescriptor", {}).get("translationKey")
 
             # Log the game descriptor for debugging
-            logger.debug(f"Processing data point with game descriptor: {data_point_gd}")
 
             # Only process data points that match the requested game descriptor
             if data_point_gd != game_descriptor:
-                logger.debug(f"Skipping data point with game descriptor: {data_point_gd} (expected: {game_descriptor})")
                 continue
 
             # For all data types
@@ -207,39 +185,32 @@ class AllDataCollector:
                         # Format as string
                         formatted_date = date_time.strftime("%Y-%m-%d %H:%M:%S")
                         data["X_DATE"] = formatted_date
-                        logger.debug(f"Added formatted date field: {formatted_date} (from timestamp: {timestamp_ms})")
                     except Exception as e:
                         # If conversion fails, use the original timestamp
                         data["X_DATE"] = timestamp_ms
                         logger.warning(f"Failed to convert timestamp {timestamp_ms} to readable format: {e}")
                 else:
                     data["X_DATE"] = timestamp_ms
-                    logger.debug(f"Added date field: {timestamp_ms}")
 
             # Extract additional metadata with X_ prefix
             if "id" in data_point:
                 data["X_ACTIVITY_ID"] = data_point.get("id")
-                logger.debug(f"Added activity ID field: {data_point.get('id')}")
 
             # Extract game descriptor information
             if "gameDescriptor" in data_point and isinstance(data_point.get("gameDescriptor"), dict):
                 game_descriptor_data = data_point.get("gameDescriptor", {})
                 if "translationKey" in game_descriptor_data:
                     data["X_GAME_DESCRIPTOR"] = game_descriptor_data.get("translationKey")
-                    logger.debug(f"Added game descriptor field: {game_descriptor_data.get('translationKey')}")
                 if "id" in game_descriptor_data:
                     data["X_GAME_DESCRIPTOR_ID"] = game_descriptor_data.get("id")
-                    logger.debug(f"Added game descriptor ID field: {game_descriptor_data.get('id')}")
 
             # Extract player information
             if "player" in data_point and isinstance(data_point.get("player"), dict):
                 player_data = data_point.get("player", {})
                 if "name" in player_data:
                     data["X_PLAYER_NAME"] = player_data.get("name")
-                    logger.debug(f"Added player name field: {player_data.get('name')}")
                 if "id" in player_data:
                     data["X_PLAYER_ID"] = player_data.get("id")
-                    logger.debug(f"Added player ID field: {player_data.get('id')}")
 
             # Extract timestamps if available
             if "createdAt" in data_point:
@@ -250,7 +221,6 @@ class AllDataCollector:
                         date_time = datetime.datetime.fromtimestamp(timestamp_sec)
                         formatted_date = date_time.strftime("%Y-%m-%d %H:%M:%S")
                         data["X_CREATED_AT"] = formatted_date
-                        logger.debug(f"Added created at field: {formatted_date}")
                     except Exception as e:
                         data["X_CREATED_AT"] = timestamp_ms
                         logger.warning(f"Failed to convert created at timestamp {timestamp_ms} to readable format: {e}")
@@ -263,7 +233,7 @@ class AllDataCollector:
                         date_time = datetime.datetime.fromtimestamp(timestamp_sec)
                         formatted_date = date_time.strftime("%Y-%m-%d %H:%M:%S")
                         data["X_UPDATED_AT"] = formatted_date
-                        logger.debug(f"Added updated at field: {formatted_date}")
+
                     except Exception as e:
                         data["X_UPDATED_AT"] = timestamp_ms
                         logger.warning(f"Failed to convert updated at timestamp {timestamp_ms} to readable format: {e}")
@@ -272,7 +242,6 @@ class AllDataCollector:
             if "latitude" in data_point and "longitude" in data_point:
                 data["X_LATITUDE"] = data_point.get("latitude")
                 data["X_LONGITUDE"] = data_point.get("longitude")
-                logger.debug(f"Added location fields: lat={data_point.get('latitude')}, lon={data_point.get('longitude')}")
 
             # Extract property keys
             if "propertyInstances" in data_point and isinstance(data_point.get("propertyInstances"), list):
@@ -284,7 +253,6 @@ class AllDataCollector:
                             property_keys.append(prop_data.get("translationKey"))
                 if property_keys:
                     data["X_PROPERTY_KEYS"] = property_keys
-                    logger.debug(f"Added property keys field: {property_keys}")
 
             for property_instance in data_point.get("propertyInstances", []):
                 prop_key = property_instance.get("property", {}).get("translationKey")
@@ -293,7 +261,6 @@ class AllDataCollector:
 
             if data:
                 data_list.append(data)
-                logger.debug(f"Added data point with keys: {list(data.keys())}")
 
         return data_list
 
@@ -334,7 +301,6 @@ class AllDataCollector:
                 with open(file_path, 'w') as json_file:
                     json.dump(parsed_responses, json_file, indent=4)
 
-                logger.info(f"Saved {len(parsed_responses)} raw JSON responses for {data_type} to {file_path}")
                 return file_path
             else:
                 logger.warning(f"No valid raw JSON responses to save for {data_type}")
@@ -362,9 +328,7 @@ class AllDataCollector:
 
             if metadata:
                 metadata_list.append(metadata)
-                logger.debug(f"Extracted metadata with keys: {list(metadata.keys())}")
 
-        logger.info(f"Extracted {len(metadata_list)} metadata items for {data_type}")
         return metadata_list
 
     def _format_dates_in_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
@@ -459,7 +423,6 @@ class AllDataCollector:
                 for uid, email in mappings.items():
                     mapping_file.write(f"{uid}: {email}\n")
 
-            logger.info(f"Saved user ID to email mapping for user {self.user_id} to {mapping_file_path}")
             return mapping_file_path
         except Exception as e:
             logger.error(f"Failed to save user ID to email mapping: {e}")
@@ -501,7 +464,6 @@ class AllDataCollector:
             with open(json_file_path, 'w') as json_file:
                 json.dump(filtered_data, json_file, indent=4)
 
-            logger.info(f"Saved {len(filtered_data)} {data_type} data points to {json_file_path}")
             return json_file_path
         except Exception as e:
             logger.error(f"Failed to save data to file: {e}")

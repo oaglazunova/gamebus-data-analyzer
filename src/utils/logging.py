@@ -38,9 +38,9 @@ def setup_logging(log_to_file: bool = True, log_level: str = None, log_type: str
     if logger.hasHandlers():
         logger.handlers.clear()
 
-    # Create console handler
+    # Create console handler (limit console to warnings and above)
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(numeric_level)
+    console_handler.setLevel(logging.WARNING)
 
     # Create formatter
     formatter = logging.Formatter(LOG_FORMAT)

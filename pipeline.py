@@ -76,7 +76,6 @@ def run_extraction(user_row: pd.Series) -> Dict[str, List[Dict[str, Any]]]:
 
     Args:
         user_row: User data row from DataFrame
-        data_types: Types of data to collect
 
     Returns:
         Dictionary of collected data by type
@@ -200,7 +199,7 @@ def main():
 
     logger.info(f"Run extraction: {should_run_extraction}, Run analysis: {should_run_analysis}")
 
-    # If only analysis is being run (--analyze flag is specified), check if data_raw folder exists and contains data
+    # If only analysis is being run (--analyze flag is specified), optionally check for data_raw JSON but do not block analysis
     if should_run_analysis and not should_run_extraction:
         import os
         import glob
@@ -208,18 +207,16 @@ def main():
 
         # Check if data_raw folder exists
         if not os.path.exists(RAW_DATA_DIR):
-            logger.error(f"Data directory {RAW_DATA_DIR} does not exist.")
-            print(f"Error: Data directory {RAW_DATA_DIR} does not exist.")
-            print("Please run 'python pipeline.py --extract' to extract data first.")
-            return
-
-        # Check if data_raw folder contains any data files
-        data_files = glob.glob(f'{RAW_DATA_DIR}/*.json')
-        if not data_files:
-            logger.error(f"No data files found in {RAW_DATA_DIR}.")
-            print(f"Error: No data files found in {RAW_DATA_DIR}.")
-            print("Please run 'python pipeline.py --extract' to extract data first.")
-            return
+            logger.warning(f"Data directory {RAW_DATA_DIR} does not exist. Proceeding with analysis using Excel data only.")
+            print(f"Warning: Data directory {RAW_DATA_DIR} does not exist.")
+            print("Proceeding with analysis using Excel data only (config/campaign_*.xlsx).")
+        else:
+            # Check if data_raw folder contains any data files
+            data_files = glob.glob(f'{RAW_DATA_DIR}/*.json')
+            if not data_files:
+                logger.warning(f"No JSON data files found in {RAW_DATA_DIR}. Proceeding with analysis using Excel data only.")
+                print(f"Warning: No JSON data files found in {RAW_DATA_DIR}.")
+                print("Proceeding with analysis using Excel data only (config/campaign_*.xlsx).")
 
     # Run extraction if needed
     if should_run_extraction:

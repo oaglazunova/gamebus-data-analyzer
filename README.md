@@ -10,7 +10,7 @@ This project extracts user activity data from the GameBus API and performs vario
 
 - **Data Extraction**: Retrieves data from GameBus API
 - **Parallel Processing**: Processes multiple users concurrently for improved performance
-- ** Analysis**: Generates statistics and visualizations for activity patterns, user engagement, etc.
+- **Analysis**: Generates statistics and visualizations for activity patterns, user engagement, etc.
 
 ## Quick Start
 
@@ -134,3 +134,25 @@ Configuration files are tracked by Git, but sensitive content (XLSX files with c
 ## License
 
 This project is licensed under the MIT License.
+
+## Visualization color palettes and accessibility
+
+- Default theme: Seaborn "colorblind" palette with whitegrid background for readability.
+- Categorical charts (bars, lines with distinct series):
+  - BAR_COLORMAP = tab20 for many distinct categories.
+  - LINE_COLORMAP = tab10 for up to ~10 lines; pandas/seaborn will cycle through the colorblind-friendly palette.
+- Sequential data (heatmaps showing magnitude):
+  - SEQUENTIAL_HEATMAP_COLORMAP = viridis (perceptually uniform, colorblind-friendly).
+- Diverging data (values around a center, e.g., correlations):
+  - CORRELATION_HEATMAP_COLORMAP = coolwarm; when plotting correlations, set center=0.
+- Single-series bars (e.g., counts over time):
+  - SINGLE_SERIES_COLOR = first color from the colorblind palette, used for consistent, accessible single-color bars.
+
+Where to change:
+- See src\analysis\data_analysis.py near the top (plot style and colormap constants). Update those constants to customize palettes project-wide.
+
+Example to override in code (optional per script):
+- In your analysis script, before plotting:
+  - import seaborn as sns
+  - sns.set_palette("deep")  # or any seaborn palette name
+  - Or change BAR_COLORMAP/SEQUENTIAL_HEATMAP_COLORMAP constants in data_analysis.py.

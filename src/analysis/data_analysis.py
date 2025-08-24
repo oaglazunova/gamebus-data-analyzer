@@ -3,7 +3,7 @@ GameBus Health Behavior Mining Data Analysis Script
 
 This script analyzes data from the GameBus Health Behavior Mining project, including:
 1. Excel files in the config directory containing campaign, and activity data
-2. JSON files in the data_raw directory containing player-specific data like activity types, and mood logs
+2. JSON files in the data_raw directory containing user-specific data like activity types, and mood logs
 
 The script generates:
 1. Descriptive statistics tables for each variable, providing insights into:
@@ -13,7 +13,7 @@ The script generates:
 
 2. Various visualizations to provide insights into:
    - Activity patterns and distributions
-   - Player engagement and participation
+   - User engagement and participation
    - Movement types and physical activity metrics
 
 3. Bivariate analyses to explore relationships between variables:
@@ -40,6 +40,7 @@ import os
 import sys
 import pandas as pd
 import json
+import re
 import matplotlib.pyplot as plt
 import seaborn as sns
 import glob
@@ -68,8 +69,9 @@ if logger.hasHandlers():
 # Create formatter
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
-# Add console handler
+# Add console handler (only warnings and above to console)
 console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.WARNING)
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
@@ -84,16 +86,18 @@ logger.propagate = False
 # Set style for plots
 plt.style.use('ggplot')
 sns.set(style="whitegrid")
+sns.set_palette("colorblind")
 
 # Colormaps for different types of visualizations
-BAR_COLORMAP = 'viridis'  # Perceptually uniform, good for categorical data
+BAR_COLORMAP = 'tab20'  # Qualitative palette for categorical bars
 PIE_COLORMAP = 'tab10'    # Distinct colors for categorical data
 CORRELATION_HEATMAP_COLORMAP = 'coolwarm'  # Diverging colormap for correlation matrices
-SEQUENTIAL_HEATMAP_COLORMAP = 'turbo'  # Sequential colormap for heatmaps showing magnitude
+SEQUENTIAL_HEATMAP_COLORMAP = 'viridis'  # Perceptually uniform sequential colormap
 LINE_COLORMAP = 'tab10'   # Good for distinguishing multiple lines
 HISTOGRAM_COLORMAP = 'Blues'  # Sequential colormap for frequency distributions
 BOX_COLORMAP = 'Set2'     # Categorical colormap for categorical comparisons
 REGRESSION_COLORMAP = 'Blues'  # Sequential colormap for showing relationships
+SINGLE_SERIES_COLOR = sns.color_palette("colorblind", 10)[0]
 
 def get_independent_colormap(n_colors: int):
 	"""
@@ -203,7 +207,6 @@ def create_and_save_figure(
 	plt.tight_layout()
 	plt.savefig(filename, bbox_inches='tight')
 	plt.close()  # Close the figure to free memory
-	logger.info(f"Figure saved to: {filename}")
 
 def generate_descriptive_stats(df, title, filename=None):
 	"""
@@ -231,39 +234,6 @@ def generate_descriptive_stats(df, title, filename=None):
 
 		# Round all numerical values to 2 decimal places
 		num_stats = num_stats.round(2)
-
-def perform_bivariate_analysis(df, title, filename=None):
-	"""
-    Compute pairwise relationships between numeric variables in a DataFrame and return the
-    correlation matrix. This function no longer renders or saves any plots.
-
-    What it does now:
-    - Selects numeric columns (int64, float64) from the provided DataFrame.
-    - If at least two numeric columns are present, computes the Pearson correlation
-      matrix between those columns and rounds the coefficients to two decimals.
-    - Returns the correlation matrix for further use by callers.
-
-    Args:
-        df: pandas.DataFrame to analyze.
-        title: Unused for plotting; retained for backward compatibility and potential logging.
-        filename: Unused parameter kept for backward compatibility (ignored).
-
-    Returns:
-        pandas.DataFrame | None: The rounded Pearson correlation matrix if computed; otherwise None.
-    """
-	# Select numerical columns
-	numerical_cols = df.select_dtypes(include=['int64', 'float64']).columns
-
-	# Correlation analysis for numerical variables
-	if len(numerical_cols) >= 2:
-		corr_matrix = df[numerical_cols].corr(method='pearson')
-		# Round correlation values to 2 decimal places
-		corr_matrix = corr_matrix.round(2)
-		logger.info(f"Computed correlation matrix for bivariate analysis on '{title}' with {len(numerical_cols)} numeric columns")
-		return corr_matrix
-	else:
-		logger.info("perform_bivariate_analysis: fewer than two numeric columns; skipping correlation computation")
-		return None
 
 def _load_excel_sheets(path: str, prefix: str = "") -> Dict[str, pd.DataFrame]:
 	"""
@@ -335,18 +305,13 @@ def load_json_files() -> Dict[str, Union[pd.DataFrame, Dict]]:
 		logger.warning(f"No JSON files found in {RAW_DATA_DIR}")
 		return data_dict
 
-	logger.info(f"Found {len(json_files)} JSON files in {RAW_DATA_DIR}")
-
 	for file in json_files:
-		# Extract player ID and data type from filename
+		# Extract user ID and data type from filename
 		filename = os.path.basename(file)
 		key = filename.split('.')[0]  # Remove .json extension
 
-		# Debug: Print filename and key
-		logger.info(f"Processing file: {filename}, key: {key}")
-
 		try:
-			with open(file, 'r') as f:
+			with open(file, 'r', encoding='utf-8') as f:
 				try:
 					data = json.load(f)
 				except json.JSONDecodeError as e:
@@ -359,20 +324,34 @@ def load_json_files() -> Dict[str, Union[pd.DataFrame, Dict]]:
 					logger.warning(f"Empty data list in {filename}, skipping")
 					continue
 
-				df = pd.DataFrame(data)
+				# Optimize DataFrame construction for very large JSON lists
+				if isinstance(data[0], dict):
+					CHUNK_SIZE = 5000
+					n = len(data)
+					if n > CHUNK_SIZE:
+						frames = []
+						for start in range(0, n, CHUNK_SIZE):
+							end = min(start + CHUNK_SIZE, n)
+							chunk = data[start:end]
+							frames.append(pd.DataFrame.from_records(chunk))
+						df = pd.concat(frames, ignore_index=True, sort=True)
+					else:
+						df = pd.DataFrame.from_records(data)
+				else:
+					# If it's a list of scalars or non-dicts, wrap them
+					df = pd.DataFrame({'value': data})
+
 				if df.empty:
 					logger.warning(f"Empty DataFrame created from {filename}, skipping")
 					continue
 
 				data_dict[key] = df
-				logger.info(f"Loaded {filename} with {len(df)} rows and {len(df.columns)} columns")
 			else:
 				if not data:  # Skip empty dictionaries
 					logger.warning(f"Empty data dictionary in {filename}, skipping")
 					continue
 
 				data_dict[key] = data
-				logger.info(f"Loaded {filename} (not converted to DataFrame)")
 		except FileNotFoundError:
 			logger.error(f"File not found: {file}")
 		except PermissionError:
@@ -438,7 +417,7 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
     This function analyzes activity data, including:
     - Activity types and frequencies
     - Points distribution
-    - Player engagement patterns
+  		- User engagement patterns
     - Temporal patterns (daily, hourly)
     - User drop-out rates
     - Active vs. passive usage
@@ -447,14 +426,14 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
         csv_data: Dictionary of DataFrames containing campaign data
         json_data: Dictionary of DataFrames or dictionaries from JSON files
 
-    Returns:
-        Optional[Tuple]: Tuple containing:
-            - activities DataFrame
-            - unique_users_count
-            - usage_metrics dictionary
-            - dropout_metrics dictionary
-            - campaign_metrics dictionary
-        Returns None if activities data is not found or invalid
+   	Returns:
+		Optional[Tuple]: Tuple containing:
+			- activities DataFrame
+			- unique_users_count
+			- dropout_metrics dictionary
+			- joining_metrics dictionary
+			- campaign_metrics dictionary
+		Returns None if activities data is not found or invalid
     """
 	# Check if activities data exists
 	if 'activities' not in csv_data:
@@ -476,8 +455,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 		logger.error(f"Activities DataFrame is missing required columns: {missing_columns}")
 		return None
 
-	logger.info(f"Analyzing activities data with {len(activities)} rows")
-
 	# Process the data
 	try:
 		# Convert createdAt to datetime
@@ -489,11 +466,91 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 		activities['points'] = activities['rewardedParticipations'].apply(extract_points)
 
 		# Extract detailed reward information
-		logger.info("Extracting detailed reward information")
 		activities['detailed_rewards'] = activities['rewardedParticipations'].apply(extract_detailed_rewards)
 
 		# Create a column with the number of rewards per activity
 		activities['num_rewards'] = activities['detailed_rewards'].apply(len)
+
+		# Classify users into Active (any rewarded activity) and Passive (enrolled but never rewarded)
+		try:
+			# Aggregate rewards/points per user
+			per_user = activities.groupby('pid').agg(
+				total_rewards=('num_rewards', 'sum'),
+				total_points=('points', 'sum')
+			).reset_index()
+
+			active_user_ids = set(per_user[(per_user['total_rewards'] > 0) | (per_user['total_points'] > 0)]['pid'].tolist())
+
+			# Infer enrolled users from any loaded sheets that contain a pid/playerId column; fallback to activities' pids
+			enrolled_user_ids = set()
+			for key, df in csv_data.items():
+				if isinstance(df, pd.DataFrame):
+					try:
+						cols_map = {c.lower(): c for c in df.columns}
+						pid_col = cols_map.get('pid') or cols_map.get('playerid')
+						if pid_col is not None and pid_col in df.columns:
+							enrolled_user_ids.update(pd.Series(df[pid_col]).dropna().unique().tolist())
+					except Exception:
+						pass
+			if not enrolled_user_ids:
+				enrolled_user_ids = set(activities['pid'].dropna().unique().tolist())
+
+			passive_user_ids = sorted(list(enrolled_user_ids - active_user_ids))
+			active_users_count = len(active_user_ids)
+			passive_users_count = len(passive_user_ids)
+
+			# Map engagement label back to activities (by rewards definition)
+			engagement_map = {pid: ('Active' if pid in active_user_ids else 'Passive') for pid in activities['pid'].dropna().unique()}
+			activities['engagement_by_rewards'] = activities['pid'].map(engagement_map)
+
+			# Create visualization: Active vs Passive users (by rewards)
+			try:
+				total_users_considered = active_users_count + passive_users_count
+				if total_users_considered > 0:
+					def plot_active_passive_pie():
+						labels = ['Active', 'Passive']
+						sizes = [active_users_count, passive_users_count]
+						# Choose colors from the configured colormap
+						try:
+							cmap = plt.get_cmap(PIE_COLORMAP)
+							colors = [cmap(0), cmap(3)]
+						except Exception:
+							colors = None
+						wedges, _texts, _autotexts = plt.pie(
+							sizes,
+							labels=[f"Active ({active_users_count})", f"Passive ({passive_users_count})"],
+							autopct='%1.1f%%' if sum(sizes) > 0 else None,
+							colors=colors,
+							startangle=90,
+							wedgeprops={'edgecolor': 'white'}
+						)
+						plt.title('Active vs Passive Users')
+						plt.axis('equal')
+						legend_labels = [
+							"Active: users who performed rewarded activities/tasks",
+							"Passive: users who were enrolled in a campaign but never got any rewards for tasks"
+						]
+						try:
+							plt.legend(wedges, legend_labels, title='Legend', loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=1, frameon=True)
+						except Exception:
+							plt.legend(legend_labels, title='Legend', loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=1, frameon=True)
+
+					create_and_save_figure(
+						plot_active_passive_pie,
+						f'{OUTPUT_VISUALIZATIONS_DIR}/user_active_vs_passive_pie.png',
+						figsize=(8, 6)
+					)
+				else:
+					logger.warning('No users to plot for Active vs Passive pie chart')
+			except Exception as e:
+				logger.error(f"Error creating Active vs Passive users pie chart: {e}")
+		
+		except Exception as e2:
+			logger.error(f"Error classifying active/passive users: {e2}")
+			active_user_ids = set()
+			passive_user_ids = []
+			active_users_count = 0
+			passive_users_count = 0
 	except Exception as e:
 		logger.error(f"Error processing activities data: {e}")
 		return None
@@ -505,13 +562,8 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 		activities_for_stats = activities.copy()
 		if 'properties' in activities_for_stats.columns:
 			activities_for_stats = activities_for_stats.drop(columns=['properties'])
-			logger.info("Dropped 'properties' column for statistics generation")
 
 		generate_descriptive_stats(activities_for_stats, "Activities Data", None)
-		logger.info("Generated descriptive statistics for activities data")
-
-		# Skip bivariate analysis for activities data to avoid ANOVA test warnings
-		# perform_bivariate_analysis(activities_for_stats, "Activities Data", None)
 
 		# Free memory
 		del activities_for_stats
@@ -556,7 +608,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 			# Determine the start date and calculate waves based on weekly periods
 			start_date = activities['date'].min()
 			activities['wave'] = ((activities['date'] - start_date).dt.days // 7) + 1
-			logger.info(f"Created 'wave' column with values from 1 to {activities['wave'].max()}")
 
 		# Function to create wave comparison barplots
 		def plot_wave_comparisons():
@@ -584,13 +635,12 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 			f'{OUTPUT_VISUALIZATIONS_DIR}/wave_comparisons.png',
 			figsize=(12, 12)
 		)
-		logger.info("Created wave comparisons barplots")
 
-		# If 'pid' (player ID) column exists, create wave comparisons by player
+		# If 'pid' (user ID) column exists, create wave comparisons by user
 		if 'pid' in activities.columns:
 			def plot_wave_comparisons_by_player():
-				# Create pivot table: waves vs players with activity counts
-				# Note: Using all players may reduce readability if there are many players
+				# Create pivot table: waves vs users with activity counts
+				# Note: Using all users may reduce readability if there are many users
 				# Consider adding filtering if the visualization becomes too cluttered
 				player_wave_counts = pd.crosstab(
 					activities['wave'], 
@@ -600,13 +650,13 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				# Plot the data
 				cmap = INDEPENDENT_COLORMAP(player_wave_counts.shape[1]) if callable(INDEPENDENT_COLORMAP) else INDEPENDENT_COLORMAP
 				ax = player_wave_counts.plot(kind='bar', figsize=(12, 6), colormap=cmap)
-				plt.title('Activities per Wave by Players')
+				plt.title('Activities per Wave by Users')
 				plt.xlabel('Wave')
 				plt.ylabel('Number of Activities')
 				# Place legend below the plot
 				handles, labels = ax.get_legend_handles_labels()
 				ncols = min(6, max(1, len(labels)))
-				legend = plt.legend(handles, labels, title='Player ID', loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=ncols, frameon=False)
+				legend = plt.legend(handles, labels, title='User ID', loc='upper center', bbox_to_anchor=(0.5, -0.15), ncol=ncols, frameon=False)
 				# Add a bit of extra bottom margin so the legend fits nicely
 				plt.subplots_adjust(bottom=0.2)
 				plt.tight_layout()
@@ -616,7 +666,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				f'{OUTPUT_VISUALIZATIONS_DIR}/wave_comparisons_by_player.png',
 				figsize=(12, 8)
 			)
-			logger.info("Created wave comparisons by player barplots")
 
 		# Create wave comparisons by activity type
 		def plot_wave_comparisons_by_activity_type():
@@ -642,7 +691,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 			f'{OUTPUT_VISUALIZATIONS_DIR}/wave_comparisons_by_activity_type.png',
 			figsize=(12, 8)
 		)
-		logger.info("Created wave comparisons by activity type barplots")
 
 		# Create wave comparisons of average points by activity type
 		def plot_wave_points_by_activity_type():
@@ -665,7 +713,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 			f'{OUTPUT_VISUALIZATIONS_DIR}/wave_points_by_activity_type.png',
 			figsize=(12, 8)
 		)
-		logger.info("Created wave comparisons of points by activity type barplots")
 	except Exception as e:
 		logger.error(f"Error creating wave comparisons barplots: {e}")
 		# Continue with other visualizations even if this one fails
@@ -701,7 +748,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				f'{OUTPUT_VISUALIZATIONS_DIR}/activities_over_time.png',
 				figsize=(14, 7)
 			)
-			logger.info("Created activities over time visualization")
 	except Exception as e:
 		logger.error(f"Error creating activities over time visualization: {e}")
 		# Continue with other visualizations even if this one fails
@@ -727,7 +773,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				f'{OUTPUT_VISUALIZATIONS_DIR}/points_by_activity_type.png',
 				figsize=(12, 6)
 			)
-			logger.info("Created points by activity type visualization")
 	except Exception as e:
 		logger.error(f"Error creating points by activity type visualization: {e}")
 		# Continue with other visualizations even if this one fails
@@ -786,7 +831,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				f'{OUTPUT_VISUALIZATIONS_DIR}/rewards_by_activity_type.png',
 				figsize=(12, 6)
 			)
-			logger.info("Created rewards by activity type visualization (average points)")
 	except Exception as e:
 		logger.error(f"Error creating rewards by activity type visualization: {e}")
 		# Continue with other visualizations even if this one fails
@@ -822,7 +866,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				f'{OUTPUT_VISUALIZATIONS_DIR}/points_over_time.png',
 				figsize=(14, 7)
 			)
-			logger.info("Created points over time visualization")
 	except Exception as e:
 		logger.error(f"Error creating points over time visualization: {e}")
 		# Continue with other visualizations even if this one fails
@@ -854,7 +897,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				f'{OUTPUT_VISUALIZATIONS_DIR}/user_activity_distribution.png',
 				figsize=(12, 6)
 			)
-			logger.info("Created user activity distribution visualization")
 	except Exception as e:
 		logger.error(f"Error creating user activity distribution visualization: {e}")
 		# Continue with other visualizations even if this one fails
@@ -877,7 +919,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 					row_sums = user_type_counts.sum(axis=1)
 					# Check for zero sums to avoid division by zero
 					if (row_sums == 0).any():
-						logger.warning("Some users have zero activities, removing them from normalization")
 						# Filter out rows with zero sum
 						user_type_counts = user_type_counts[row_sums > 0]
 						row_sums = user_type_counts.sum(axis=1)
@@ -925,7 +966,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 							f'{OUTPUT_VISUALIZATIONS_DIR}/activity_type_by_user.png',
 							figsize=(14, height)
 						)
-						logger.info("Created activity type by user visualization")
 				except Exception as e:
 					logger.error(f"Error in normalization or heatmap creation: {e}")
 	except Exception as e:
@@ -936,14 +976,11 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 	try:
 		# Count unique users in the campaign
 		unique_users_count = activities['pid'].nunique()
-		logger.info(f"Number of unique users in the campaign: {unique_users_count}")
 
 		# Calculate campaign length (days between first and last activity)
 		campaign_start = activities['createdAt'].min()
 		campaign_end = activities['createdAt'].max()
 		campaign_length_days = (campaign_end - campaign_start).days
-
-		logger.info(f"Campaign length: {campaign_length_days} days (from {campaign_start.date()} to {campaign_end.date()})")
 
 		# Extract campaign name and abbreviation from campaign_desc.xlsx if available
 		campaign_name = "GameBus Campaign"  # Default name
@@ -957,7 +994,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 					names = df['name'].dropna()
 					if not names.empty:
 						campaign_name = names.iloc[0]
-						logger.info(f"Found campaign name: {campaign_name}")
 
 						# Try to get the abbreviation from the same row if available
 						if 'abbreviation' in df.columns:
@@ -965,7 +1001,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 							row_idx = names.index[0]
 							if row_idx in df.index and not pd.isna(df.loc[row_idx, 'abbreviation']):
 								campaign_abbr = df.loc[row_idx, 'abbreviation']
-								logger.info(f"Found campaign abbreviation: {campaign_abbr}")
 						break
 				except Exception as e:
 					logger.warning(f"Error extracting campaign name/abbreviation from {key}: {e}")
@@ -977,7 +1012,10 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 			'start_date': campaign_start.date(),
 			'end_date': campaign_end.date(),
 			'name': campaign_name,
-			'abbreviation': campaign_abbr
+			'abbreviation': campaign_abbr,
+			'active_users_count': active_users_count if 'active_users_count' in locals() else 0,
+			'passive_users_count': passive_users_count if 'passive_users_count' in locals() else 0,
+			'passive_user_ids': passive_user_ids if 'passive_user_ids' in locals() else []
 		}
 	except Exception as e:
 		logger.error(f"Error calculating campaign metrics: {e}")
@@ -1001,7 +1039,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 
 		# Handle negative dropout days (should not happen with proper data)
 		if (user_dropout['dropout_days'] < 0).any():
-			logger.warning("Found negative dropout days, setting them to 0")
 			user_dropout.loc[user_dropout['dropout_days'] < 0, 'dropout_days'] = 0
 
 		# Generate descriptive statistics for drop-out rates
@@ -1031,7 +1068,7 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 		else:
 			# 1. Histogram of drop-out rates
 			def plot_dropout_rates_histogram():
-				sns.histplot(user_dropout['dropout_days'], kde=True, bins=20, palette=HISTOGRAM_COLORMAP)
+				sns.histplot(user_dropout['dropout_days'], kde=True, bins=20, color='tab:blue')
 				plt.title('Distribution of User Drop-out Rates')
 				plt.xlabel('Time Between First and Last Activity (days)')
 				plt.ylabel('Number of Users')
@@ -1041,7 +1078,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				f'{OUTPUT_VISUALIZATIONS_DIR}/dropout_rates_distribution.png',
 				figsize=(10, 6)
 			)
-			logger.info("Created dropout rates histogram visualization")
 	except Exception as e:
 		logger.error(f"Error creating dropout rates histogram: {e}")
 		# Continue with other visualizations even if this one fails
@@ -1081,7 +1117,7 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 			# Create visualizations for joining rates
 			# 1. Histogram of joining rates
 			def plot_joining_rates_histogram():
-				sns.histplot(user_dropout['joining_days'], kde=True, bins=20, palette=HISTOGRAM_COLORMAP)
+				sns.histplot(user_dropout['joining_days'], kde=True, bins=20, color='tab:red')
 				plt.title('Distribution of User Joining Rates')
 				plt.xlabel('Days Between Campaign Start and First Activity')
 				plt.ylabel('Number of Users')
@@ -1091,7 +1127,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				f'{OUTPUT_VISUALIZATIONS_DIR}/joining_rates_distribution.png',
 				figsize=(10, 6)
 			)
-			logger.info("Created joining rates histogram visualization")
 
 			# 3. Combined plot of dropout and joining rates (KDE)
 			def plot_combined_rates():
@@ -1114,7 +1149,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				f'{OUTPUT_VISUALIZATIONS_DIR}/combined_dropout_joining_rates.png',
 				figsize=(12, 7)
 			)
-			logger.info("Created combined dropout and joining rates visualization (KDE)")
 
 			# 4. Combined boxplot of dropout and joining rates
 			def plot_combined_boxplots():
@@ -1132,7 +1166,7 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				combined_df = pd.concat([dropout_df, joining_df])
 
 				# Create the boxplot
-				sns.boxplot(x='metric', y='days', data=combined_df, palette=['blue', 'red'])
+				sns.boxplot(x='metric', y='days', data=combined_df, hue='metric', palette=['blue', 'red'], legend=False, dodge=False)
 				plt.title('Distribution of User Dropout and Joining Rates')
 				plt.xlabel('')
 				plt.ylabel('Days')
@@ -1146,7 +1180,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				f'{OUTPUT_VISUALIZATIONS_DIR}/combined_dropout_joining_boxplots.png',
 				figsize=(12, 7)
 			)
-			logger.info("Created combined dropout and joining rates boxplot visualization")
 	except Exception as e:
 		logger.error(f"Error calculating or visualizing joining rates: {e}")
 		joining_metrics = None
@@ -1229,16 +1262,8 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 					# Fill NaN values with 0
 					activity_heatmap_data = activity_heatmap_data.fillna(0)
 
-					# Check if we have data for all hours
-					all_hours = set(range(24))
-					missing_hours = all_hours - set(activity_heatmap_data.columns)
-					if missing_hours:
-						logger.info(f"Missing hours in heatmap: {sorted(missing_hours)}")
-						# Add missing hours with count 0
-						for hour in missing_hours:
-							activity_heatmap_data[hour] = 0
-						# Sort columns
-						activity_heatmap_data = activity_heatmap_data.reindex(sorted(activity_heatmap_data.columns), axis=1)
+					# Ensure all 24 hours are present and in order
+					activity_heatmap_data = activity_heatmap_data.reindex(columns=range(24), fill_value=0)
 
 					if activity_heatmap_data.empty or activity_heatmap_data.sum().sum() == 0:
 						logger.warning("Empty heatmap data, skipping visualization")
@@ -1247,7 +1272,7 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 							# Use a fixed format string for the heatmap
 							# We'll use '.0f' for all values since most will be integers
 							sns.heatmap(activity_heatmap_data, cmap=SEQUENTIAL_HEATMAP_COLORMAP, annot=True,
-										fmt='.1f', linewidths=0.5)
+										fmt='.0f', linewidths=0.5)
 							plt.title('Activity Heatmap by Day of Week and Hour of Day')
 							plt.xlabel('Hour of Day')
 							plt.ylabel('Day of Week')
@@ -1257,7 +1282,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 							f'{OUTPUT_VISUALIZATIONS_DIR}/activity_heatmap_by_time.png',
 							figsize=(15, 8)
 						)
-						logger.info("Created activity heatmap by time visualization")
 				except Exception as e:
 					logger.error(f"Error creating crosstab for heatmap: {e}")
 			except Exception as e:
@@ -1362,7 +1386,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 							plt.tight_layout()
 							plt.savefig(f"{OUTPUT_VISUALIZATIONS_DIR}/activity_types_stacked_by_date.png", bbox_inches='tight')
 							plt.close()
-							logger.info("Created activity types stacked by date visualization")
 			except Exception as e:
 				logger.error(f"Error processing data for stacked bar chart: {e}")
 	except Exception as e:
@@ -1453,7 +1476,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 									f'{OUTPUT_VISUALIZATIONS_DIR}/user_engagement_heatmap.png',
 									figsize=(16, 10)
 								)
-								logger.info("Created user engagement heatmap visualization")
 			except Exception as e:
 				logger.error(f"Error processing data for user engagement heatmap: {e}")
 	except Exception as e:
@@ -1462,8 +1484,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 
 	# Prepare return values
 	logger.info("Preparing return values from analyze_activities")
-
-	# Usage metrics have been removed as per requirements
 
 
 	# Ensure dropout_metrics is properly defined if it wasn't created earlier
@@ -1485,18 +1505,17 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 			'start_date': campaign_start.date() if 'campaign_start' in locals() and campaign_start is not None else None,
 			'end_date': campaign_end.date() if 'campaign_end' in locals() and campaign_end is not None else None,
 			'name': "GameBus Campaign",  # Default campaign name
-			'abbreviation': ""  # Default empty abbreviation
+			'abbreviation': "",  # Default empty abbreviation
+			'active_users_count': active_users_count if 'active_users_count' in locals() else 0,
+			'passive_users_count': passive_users_count if 'passive_users_count' in locals() else 0,
+			'passive_user_ids': passive_user_ids if 'passive_user_ids' in locals() else []
 		}
 
-	# Log summary of metrics
-	logger.info(f"Analysis complete: {unique_users_count} users, " +
-				f"{campaign_metrics['length_days']} days")
 
 	# Save statistics to files
 	try:
 		# Ensure statistics directory exists
 		ensure_dir(OUTPUT_STATISTICS_DIR)
-		logger.info(f"Saving statistics to {OUTPUT_STATISTICS_DIR}")
 
 		# Save campaign summary
 		try:
@@ -1524,9 +1543,19 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 				f.write(f"Start Date: {start_date}\n")
 				f.write(f"End Date: {end_date}\n")
 				f.write(f"Length: {length_days} days\n")
-				f.write(f"Number of Participants: {unique_users}\n")
+				f.write(f"Number of Users: {unique_users}\n")
 
-			logger.info(f"Saved campaign summary to {campaign_summary_path}")
+				# Active/Passive users summary (by rewards)
+				active_users_count = campaign_metrics.get('active_users_count', None)
+				passive_users_count = campaign_metrics.get('passive_users_count', None)
+				if active_users_count is not None and passive_users_count is not None:
+					f.write(f"Active Users (rewarded): {active_users_count}\n")
+					f.write(f"Passive Users (enrolled, never rewarded): {passive_users_count}\n")
+					passive_ids = campaign_metrics.get('passive_user_ids', [])
+					if isinstance(passive_ids, list) and len(passive_ids) > 0:
+						preview = ', '.join(map(str, passive_ids[:10]))
+						f.write(f"Passive User IDs (preview): {preview}\n")
+
 		except Exception as e:
 			logger.error(f"Error saving campaign summary: {e}")
 
@@ -1651,7 +1680,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 						f.write(table)
 						f.write("\n\n")
 
-						logger.info("Generated task frequency analysis")
 					except Exception as e:
 						logger.error(f"Error calculating task frequency statistics: {e}")
 						f.write(f"Error calculating task frequency statistics: {e}\n\n")
@@ -1760,7 +1788,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 							f.write(table)
 							f.write("\n\n")
 
-							logger.info("Generated task types analysis")
 					except Exception as e:
 						logger.error(f"Error calculating task types statistics: {e}")
 						f.write(f"Error calculating task types statistics: {e}\n\n")
@@ -1803,7 +1830,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 									f.write(table)
 									f.write("\n\n")
 
-									logger.info("Generated completion rates analysis")
 							except Exception as e:
 								logger.error(f"Error calculating completion rates: {e}")
 								f.write(f"Error calculating completion rates: {e}\n\n")
@@ -1867,7 +1893,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 									f.write(table)
 									f.write("\n\n")
 
-									logger.info("Generated activity provider analysis")
 							except Exception as e:
 								logger.error(f"Error calculating provider statistics: {e}")
 								f.write(f"Error calculating provider statistics: {e}\n\n")
@@ -1942,7 +1967,6 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 										f.write(table)
 										f.write("\n\n")
 
-										logger.info("Generated rewarded points analysis")
 							except Exception as e:
 								logger.error(f"Error calculating points statistics: {e}")
 								f.write(f"Error calculating points statistics: {e}\n\n")
@@ -1992,16 +2016,13 @@ def analyze_activities(csv_data: Dict[str, pd.DataFrame], json_data: Dict[str, U
 						else:
 							f.write("- Not enough data available to generate insights.\n")
 
-						logger.info("Added summary and insights to task completion analysis")
 					except Exception as e:
 						logger.error(f"Error generating summary and insights: {e}")
 						f.write(f"Error generating summary and insights: {e}\n")
 
-		logger.info(f"Saved task completion analysis to {task_completion_path}")
 	except Exception as e:
 		logger.error(f"Error saving task completion analysis: {e}")
 
-	logger.info(f"Campaign metrics and task completion analysis saved to {OUTPUT_STATISTICS_DIR} folder")
 
 	# Return the results
 	try:
@@ -2077,7 +2098,6 @@ def analyze_engagement_patterns(df):
 
 		# Calculate engagement statistics
 		engagement_stats = df.groupby('engagement_type')['user_id'].nunique()
-		logger.info(f"\nUser engagement distribution:\n{engagement_stats}")
 
 		# Check if we have any engagement types
 		if engagement_stats.empty:
@@ -2100,7 +2120,6 @@ def analyze_engagement_patterns(df):
 				os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'user_engagement_distribution.png'),
 				figsize=(8, 6)
 			)
-			logger.info("Created user engagement distribution visualization")
 		except Exception as e:
 			logger.error(f"Error creating engagement distribution visualization: {e}")
 
@@ -2120,7 +2139,7 @@ def analyze_engagement_patterns(df):
 
 				def plot_metric_by_engagement():
 					plt.figure(figsize=(10, 6))
-					sns.boxplot(data=df, x='engagement_type', y=metric, palette=BOX_COLORMAP)
+					sns.boxplot(data=df, x='engagement_type', y=metric, hue='engagement_type', palette=BOX_COLORMAP, legend=False, dodge=False)
 					plt.title(f'{metric.capitalize()} Distribution by Engagement Type')
 					plt.xlabel('Engagement Type')
 					plt.ylabel(metric.capitalize())
@@ -2130,7 +2149,6 @@ def analyze_engagement_patterns(df):
 					os.path.join(OUTPUT_VISUALIZATIONS_DIR, f'{metric}_by_engagement.png'),
 					figsize=(10, 6)
 				)
-				logger.info(f"Created {metric} by engagement visualization")
 			except Exception as e:
 				logger.error(f"Error creating {metric} by engagement visualization: {e}")
 
@@ -2156,10 +2174,6 @@ def analyze_engagement_patterns(df):
 						alternative='two-sided'
 					)
 
-					logger.info(f"\n{metric.capitalize()} comparison:")
-					logger.info(f"Active users mean: {active_data.mean():.2f}")
-					logger.info(f"Passive users mean: {passive_data.mean():.2f}")
-					logger.info(f"Mann-Whitney U p-value: {pval:.4f}")
 			except Exception as e:
 				logger.error(f"Error performing statistical comparison for {metric}: {e}")
 	except Exception as e:
@@ -2208,8 +2222,6 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 	# load_excel_files loads that sheet directly into csv_data under the key 'activities'.
 	activities_df = csv_data['activities'].copy()
 
-	logger.info(f"Loaded data: {len(visualizations_df)} visualizations, {len(challenges_df)} challenges, {len(tasks_df)} tasks")
-
 	# Generate descriptive statistics
 	generate_descriptive_stats(visualizations_df, "Visualizations Data", None)
 	generate_descriptive_stats(challenges_df, "Challenges Data", None)
@@ -2239,7 +2251,7 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 				plt.figure(figsize=(12, 8))
 
 				# Create bar chart
-				plt.bar(range(len(activity_counts)), activity_counts.values, color='mediumpurple')
+				plt.bar(range(len(activity_counts)), activity_counts.values, color=SINGLE_SERIES_COLOR)
 
 				# Add labels
 				plt.xlabel('Activity Type')
@@ -2248,12 +2260,14 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 				plt.xticks(range(len(activity_counts)), activity_counts.index, rotation=45, ha='right')
 				plt.tight_layout()
 
+			# Save the activity completion plot
 			create_and_save_figure(
 				plot_activity_completion,
-				f'{OUTPUT_VISUALIZATIONS_DIR}/activity_completion.png',
+				os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'activity_completion.png'),
 				figsize=(14, 8)
 			)
-			logger.info("Created activity completion visualization")
+
+
 
 			# Add activity completion information to the summary file
 			with open(summary_file_path, 'a') as f:
@@ -2264,8 +2278,6 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 					f.write(f"- {activity_type}: {count}\n")
 
 			# 5. Frequency, timing, and type of tasks completed analysis
-			logger.info("Analyzing frequency, timing, and type of tasks completed...")
-
 			# Ensure activities_df has necessary columns for analysis
 			if 'createdAt' not in activities_df.columns:
 				logger.warning("No timestamp data available for frequency and timing analysis")
@@ -2294,11 +2306,19 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 				# For each activity type, analyze completion patterns
 
 				# Create a heatmap of activity types by hour
-				activity_hour_counts = pd.crosstab(activities_df['hour'], activities_df['type'])
+				# Ensure all 24 hours (0-23) are represented, even if some have zero counts
+				activity_hour_counts = pd.crosstab(activities_df['hour'], activities_df['type']).reindex(range(24), fill_value=0)
 
 				def plot_activity_type_by_hour():
 					plt.figure(figsize=(14, 8))
-					sns.heatmap(activity_hour_counts, cmap=SEQUENTIAL_HEATMAP_COLORMAP, annot=False, linewidths=.5)
+					sns.heatmap(
+						activity_hour_counts,
+						cmap=SEQUENTIAL_HEATMAP_COLORMAP,
+						annot=True,
+						fmt='.0f',
+						linewidths=.5,
+						annot_kws={'fontsize': 8}
+					)
 					plt.title('Activity Types by Hour of Day')
 					plt.xlabel('Activity Type')
 					plt.ylabel('Hour of Day')
@@ -2309,15 +2329,21 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 					f'{OUTPUT_VISUALIZATIONS_DIR}/activity_type_by_hour.png',
 					figsize=(14, 8)
 				)
-				logger.info("Created activity types by hour heatmap")
 
 				# Create a heatmap of activity types by day of week
 				activity_day_counts = pd.crosstab(activities_df['day_of_week'], activities_df['type'])
-				activity_day_counts = activity_day_counts.reindex(day_order)
+				activity_day_counts = activity_day_counts.reindex(day_order).fillna(0)
 
 				def plot_activity_type_by_day():
 					plt.figure(figsize=(14, 8))
-					sns.heatmap(activity_day_counts, cmap=SEQUENTIAL_HEATMAP_COLORMAP, annot=False, linewidths=.5)
+					sns.heatmap(
+						activity_day_counts,
+						cmap=SEQUENTIAL_HEATMAP_COLORMAP,
+						annot=True,
+						fmt='.0f',
+						linewidths=.5,
+						annot_kws={'fontsize': 8}
+					)
 					plt.title('Activity Types by Day of Week')
 					plt.xlabel('Activity Type')
 					plt.ylabel('Day of Week')
@@ -2328,7 +2354,6 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 					f'{OUTPUT_VISUALIZATIONS_DIR}/activity_type_by_day.png',
 					figsize=(14, 8)
 				)
-				logger.info("Created activity types by day heatmap")
 				
 				# Count unique active users per day of the campaign
 				active_users_per_day = activities_df.groupby('date')['pid'].nunique()
@@ -2339,7 +2364,7 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 					series = active_users_per_day.sort_index()
 					date_labels = [pd.to_datetime(d).strftime('%Y-%m-%d') for d in series.index]
 					x_pos = range(len(series))
-					plt.bar(x_pos, series.values, color='skyblue', width=0.6)
+					plt.bar(x_pos, series.values, color=SINGLE_SERIES_COLOR, width=0.6)
 					plt.title('Number of Active Users per Day')
 					plt.xlabel('Date')
 					plt.ylabel('Number of Active Users')
@@ -2357,7 +2382,6 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 					f'{OUTPUT_VISUALIZATIONS_DIR}/active_users_per_day.png',
 					figsize=(12, 6)
 				)
-				logger.info("Created active users per day chart")
 
 				# Add frequency, timing, and completion rate information to the summary file
 				with open(summary_file_path, 'a') as f:
@@ -2443,7 +2467,6 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 					
 					# Extract points if not already available
 					if 'points' not in ranking_df.columns and 'rewardedParticipations' in ranking_df.columns:
-						logger.info("Extracting points from rewardedParticipations for ranking")
 						ranking_df['points'] = ranking_df['rewardedParticipations'].apply(
 							lambda x: extract_points(x) if isinstance(x, str) else 0
 						)
@@ -2451,7 +2474,6 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 					
 					# Infer data source if not already available
 					if not has_data_source:
-						logger.info("Inferring data source from activity types for ranking")
 						# Define mapping of activity types to data sources
 						inferred_providers = {
 							'Self-report': ['NUTRITION_DIARY', 'DRINKING_DIARY', 'PLAN_MEAL'],
@@ -2494,8 +2516,7 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 							table = tabulate.tabulate(table_data, headers="firstrow", tablefmt="grid")
 							f.write(table)
 							f.write("\n\n")
-							
-							logger.info("Generated ranked completed tasks analysis")
+
 						else:
 							logger.warning("No data available for ranked tasks analysis")
 							f.write("No data available for ranked tasks analysis.\n\n")
@@ -2509,7 +2530,7 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 		import traceback
 		logger.error(f"Error traceback: {traceback.format_exc()}")
 
-	# New plots: completed tasks analysis (participants per task and completions per day)
+	# New plots: completed tasks analysis (users per task and completions per day)
 	try:
 		# Ensure we have necessary columns in activities_df
 		required_cols = ['pid']
@@ -2530,7 +2551,6 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 			# Extract detailed rewards to find challenge IDs
 			if 'detailed_rewards' not in activities_df.columns:
 				if 'rewardedParticipations' in activities_df.columns:
-					logger.info("Extracting detailed_rewards from rewardedParticipations for task completion analysis")
 					activities_df['detailed_rewards'] = activities_df['rewardedParticipations'].apply(
 						lambda x: extract_detailed_rewards(x) if isinstance(x, str) else []
 					)
@@ -2578,6 +2598,7 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 						task_completion_records.append({
 							'pid': row['pid'],
 							'task_name': str(task_name).strip(),
+							'activity_type': row.get('type'),
 							'date': row['date'] if 'date' in row and pd.notna(row['date']) else (row['createdAt'].date() if 'createdAt' in row and pd.notna(row['createdAt']) else None)
 						})
 
@@ -2601,12 +2622,141 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 					# Mapping is best-effort; continue without failing
 					pass
 
-			# If we have no task records, skip plots
+			# If we have no task records, still generate provider chart with zeros if desc_tasks has providers; otherwise skip other plots
 			if task_completions_df.empty:
-				logger.warning("No task completion records (rules) found in rewards; skipping completion plots")
+				logger.warning("No task completion records (rules) found in rewards; generating provider chart with zero counts if possible")
+				try:
+					provider_counts = None
+					if 'desc_tasks' in csv_data and not csv_data['desc_tasks'].empty:
+						tasks_desc_df = csv_data['desc_tasks'].copy()
+						col_map = {c.lower(): c for c in tasks_desc_df.columns}
+						data_providers_col = col_map.get('dataproviders')
+						if data_providers_col is not None:
+							def _parse_providers(val):
+								if pd.isna(val):
+									return []
+								if isinstance(val, list):
+									return [str(x).strip() for x in val if str(x).strip()]
+								s = str(val).strip()
+								try:
+									js = re.sub("'", '"', s)
+									parsed = json.loads(js) if (js.startswith('[') and js.endswith(']')) else None
+									if isinstance(parsed, list):
+										return [str(x).strip() for x in parsed if str(x).strip()]
+								except Exception:
+									pass
+								parts = re.split(r'[;,]', s)
+								return [p.strip() for p in parts if p.strip()]
+							tasks_desc_df['providers_list'] = tasks_desc_df[data_providers_col].apply(_parse_providers)
+							try:
+								all_providers = sorted({str(p).strip() for p in tasks_desc_df.explode('providers_list')['providers_list'] if pd.notna(p) and str(p).strip() != ''})
+							except Exception:
+								all_providers = []
+							if all_providers:
+								import pandas as _pd
+								provider_counts = _pd.Series([0]*len(all_providers), index=all_providers)
+					else:
+						logger.warning("desc_tasks sheet not found; cannot build provider chart")
+					if provider_counts is not None and not provider_counts.empty:
+						def plot_tasks_by_provider():
+							plt.figure(figsize=(12, 6))
+							_ = provider_counts.plot(kind='bar', colormap=BAR_COLORMAP)
+							plt.title('Tasks Performed by Users per Data Provider')
+							plt.xlabel('Data Provider')
+							plt.ylabel('Tasks Performed')
+							plt.xticks(rotation=45)
+						create_and_save_figure(
+							plot_tasks_by_provider,
+							os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'tasks_by_provider.png'),
+							figsize=(12, 6)
+						)
+						logger.info('Generated tasks_by_provider chart with zero counts for all providers')
+				except Exception as _e:
+					logger.error(f"Error generating zero-count provider chart: {_e}")
 			else:
 				# Unique user x task (by task name) and per-day counts
 				unique_task_completions = task_completions_df.dropna(subset=['task_name']).drop_duplicates(subset=['pid', 'task_name'])
+
+				# Tasks performed per data provider chart (matched via desc_tasks -> dataproviders by task name)
+				try:
+					provider_counts = None
+					if 'desc_tasks' in csv_data and not csv_data['desc_tasks'].empty:
+						tasks_desc_df = csv_data['desc_tasks'].copy()
+						# Build case-insensitive column map
+						col_map = {c.lower(): c for c in tasks_desc_df.columns}
+						# Prefer 'name' as instructed; fallback to common alternatives if needed
+						name_col = col_map.get('name') or col_map.get('label') or col_map.get('rule') or col_map.get('task') or col_map.get('task_name')
+						data_providers_col = col_map.get('dataproviders')
+						if name_col is None or data_providers_col is None:
+							logger.warning("desc_tasks sheet present but missing 'name' or 'dataproviders' for provider mapping; skipping tasks_by_provider chart")
+						else:
+							def _norm_name(s):
+								return re.sub(r'\s+', ' ', str(s)).strip().lower()
+							def _parse_providers(val):
+								if pd.isna(val):
+									return []
+								if isinstance(val, list):
+									return [str(x).strip() for x in val if str(x).strip()]
+								s = str(val).strip()
+								try:
+									js = re.sub("'", '"', s)
+									parsed = json.loads(js) if (js.startswith('[') and js.endswith(']')) else None
+									if isinstance(parsed, list):
+										return [str(x).strip() for x in parsed if str(x).strip()]
+								except Exception:
+									pass
+								parts = re.split(r'[;,]', s)
+								return [p.strip() for p in parts if p.strip()]
+							# Normalize names on both sides
+							tasks_desc_df['task_name_norm'] = tasks_desc_df[name_col].apply(_norm_name)
+							task_completions_df['task_name_norm'] = task_completions_df['task_name'].apply(_norm_name)
+							tasks_desc_df['providers_list'] = tasks_desc_df[data_providers_col].apply(_parse_providers)
+							# Build full provider list once
+							try:
+								all_providers = sorted({str(p).strip() for p in tasks_desc_df.explode('providers_list')['providers_list'] if pd.notna(p) and str(p).strip() != ''})
+							except Exception:
+								all_providers = []
+							# Map providers to completions by normalized name
+							providers_map = tasks_desc_df.set_index('task_name_norm')['providers_list'].to_dict()
+							task_completions_df['providers_list'] = task_completions_df['task_name_norm'].map(providers_map)
+							mapped_df = task_completions_df.dropna(subset=['providers_list']).copy()
+							if not mapped_df.empty:
+								# Explode to provider rows; count occurrences (each reward entry)
+								exploded = mapped_df.explode('providers_list').rename(columns={'providers_list': 'provider'})
+								# Count occurrences per provider from completions
+								provider_counts = exploded.dropna(subset=['provider']).groupby('provider').size()
+								# Ensure all providers are present on x-axis (include zeros) and sort alphabetically
+								if all_providers:
+									provider_counts = provider_counts.reindex(all_providers, fill_value=0)
+								else:
+									provider_counts = provider_counts.sort_values(ascending=False)
+							else:
+								# No mapped completions; build zero series if providers exist
+								if all_providers:
+									import pandas as _pd
+									provider_counts = _pd.Series([0]*len(all_providers), index=all_providers)
+					else:
+						logger.warning("desc_tasks sheet not found; skipping tasks_by_provider chart")
+					# Plot if we have counts
+					if provider_counts is not None and not provider_counts.empty:
+						def plot_tasks_by_provider():
+							plt.figure(figsize=(12, 6))
+							_ = provider_counts.plot(kind='bar', colormap=BAR_COLORMAP)
+							plt.title('Tasks Performed by Users per Data Provider')
+							plt.xlabel('Data Provider')
+							plt.ylabel('Tasks Performed')
+							plt.xticks(rotation=45)
+						create_and_save_figure(
+							plot_tasks_by_provider,
+							os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'tasks_by_provider.png'),
+							figsize=(12, 6)
+						)
+						logger.info('Generated tasks_by_provider chart (including zero-count providers)')
+					else:
+						logger.warning('No provider counts available for tasks_by_provider plot')
+				except Exception as _e:
+					logger.error(f"Error computing tasks_by_provider from desc_tasks mapping: {_e}")
+
 
 				# Plot: Number of tasks completed per day (unique user-task per day)
 				if 'date' in task_completions_df.columns and task_completions_df['date'].notna().any():
@@ -2616,7 +2766,7 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 						series = per_day.sort_index()
 						date_labels = [pd.to_datetime(d).strftime('%Y-%m-%d') for d in series.index]
 						x_pos = range(len(series))
-						plt.bar(x_pos, series.values, color='seagreen', width=0.6)
+						plt.bar(x_pos, series.values, color=SINGLE_SERIES_COLOR, width=0.6)
 						plt.title('Tasks Completed per Day')
 						plt.xlabel('Date')
 						plt.ylabel('Tasks Completed (unique user-task)')
@@ -2633,7 +2783,6 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 						os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'tasks_completed_per_day.png'),
 						figsize=(12, 6)
 					)
-					logger.info("Created tasks completed per day visualization")
 				else:
 					logger.warning("Date information not available for per-day task completion plot")
 
@@ -2658,7 +2807,6 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 						os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'tasks_completed_per_user.png'),
 						figsize=(12, 6)
 					)
-					logger.info("Created tasks completed per user visualization")
 				else:
 					logger.warning("No data available for per-user task completion plot")
 
@@ -2670,9 +2818,9 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 				with open(summary_file_path, 'a') as f:
 					f.write("\n## Task Completion Summary\n\n")
 					f.write(f"Total unique task completions (user x task): {len(unique_task_completions)}\n")
-					f.write("\nTop tasks by participants completing:\n")
+					f.write("\nTop tasks by users completing:\n")
 					for _, r in participants_plot_df.head(10).iterrows():
-						f.write(f"- {r['label']}: {int(r['participants'])} participants\n")
+						f.write(f"- {r['label']}: {int(r['participants'])} users\n")
 					# Add top users by tasks completed
 					if not per_user.empty:
 						f.write("\nTop users by tasks completed:\n")
@@ -2680,320 +2828,6 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
 							f.write(f"- User {pid}: {int(count)} tasks\n")
 	except Exception as e:
 		logger.error(f"Error generating completed tasks plots: {e}")
-
-logger.info("Completed analysis of visualizations, challenges, and tasks")
-
-
-def analyze_task_points_levels_impact(csv_data: Dict[str, pd.DataFrame], activities_df: Optional[pd.DataFrame] = None, campaign_metrics: Optional[Dict] = None) -> None:
-	"""
-	Analyze the impact of task types, points, and levels on engagement and adherence.
-
-	Definitions used (robust fallbacks are applied if exact columns are missing):
-	- Engagement (user-level):
-	  * engagement_count = number of activities a user performed.
-	  * engagement_active = Active/Passive (Active if any of STEPS/KCALORIES/DURATION > 0 if available; falls back to engagement_count > 0).
-	- Adherence (user-level):
-	  * active_days_ratio = number of unique active days / campaign_length_days (if campaign dates available),
-	    otherwise normalized by each user's observed span (min 1).
-	  * dropout_days = (last_activity - first_activity) in days.
-	- Task type: uses activities_df['type'] (activity/task kind).
-	- Points: uses activities_df['points'] (parsed from rewardedParticipations).
-	- Level: uses desc_tasks['level'] if available; otherwise derives bins from points per activity (Low/Medium/High by tertiles).
-
-	Outputs:
-	- statistics/tasks_points_levels_impact.txt (summary tables and correlation results)
-	- visualizations:
-	  * engagement_by_activity_type.png
-	  * adherence_by_activity_type.png
-	  * engagement_vs_avg_points.png
-	  * adherence_vs_avg_points.png
-	  * engagement_by_level.png (if levels available/derived)
-	  * adherence_by_level.png (if levels available/derived)
-	"""
-	try:
-		# Acquire activities data
-		if activities_df is None:
-			activities_df = csv_data.get('activities')
-		if activities_df is None or activities_df.empty:
-			logger.warning("No activities data available for tasks/points/levels impact analysis")
-			return
-
-		# Ensure required basic columns
-		required_cols = ['pid', 'type', 'createdAt']
-		missing = [c for c in required_cols if c not in activities_df.columns]
-		if missing:
-			logger.warning(f"Activities missing required columns for impact analysis: {missing}")
-			# We can still proceed if we at least have pid and type
-			if not set(['pid', 'type']).issubset(activities_df.columns):
-				return
-
-		# Work on a copy
-		df = activities_df.copy()
-
-		# Parse dates
-		if 'createdAt' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['createdAt']):
-			with pd.option_context('mode.chained_assignment', None):
-				df['createdAt'] = pd.to_datetime(df['createdAt'], errors='coerce')
-		# Derive date column for daily aggregation
-		if 'date' not in df.columns and 'createdAt' in df.columns:
-			with pd.option_context('mode.chained_assignment', None):
-				df['date'] = df['createdAt'].dt.date
-
-		# Ensure points column exists (parsed earlier in analyze_activities)
-		if 'points' not in df.columns and 'rewardedParticipations' in df.columns:
-			with pd.option_context('mode.chained_assignment', None):
-				df['points'] = df['rewardedParticipations'].apply(extract_points)
-		elif 'points' not in df.columns:
-			with pd.option_context('mode.chained_assignment', None):
-				df['points'] = 0
-
-		# Compute user-level engagement metrics
-		user_metrics = df.groupby('pid').agg(
-			engagement_count=('pid', 'size'),
-			first_activity=('createdAt', 'min'),
-			last_activity=('createdAt', 'max'),
-			active_days=('date', lambda x: x.nunique() if x is not None else 0),
-			total_points=('points', 'sum'),
-			avg_points=('points', 'mean')
-		).reset_index()
-
-		# Handle NaT values gracefully
-		user_metrics['first_activity'] = pd.to_datetime(user_metrics['first_activity'], errors='coerce')
-		user_metrics['last_activity'] = pd.to_datetime(user_metrics['last_activity'], errors='coerce')
-		user_metrics['span_days'] = (user_metrics['last_activity'] - user_metrics['first_activity']).dt.days
-		user_metrics['span_days'] = user_metrics['span_days'].fillna(0).clip(lower=0)
-
-		# Determine campaign length for adherence normalization
-		campaign_length_days = None
-		if campaign_metrics and isinstance(campaign_metrics.get('length_days', None), (int, float)) and campaign_metrics.get('length_days', 0) > 0:
-			campaign_length_days = int(campaign_metrics['length_days'])
-		elif 'date' in df.columns and df['date'].notna().any():
-			# Fallback to observed campaign span
-			dates = pd.to_datetime(df['date'], errors='coerce')
-			campaign_length_days = int((dates.max() - dates.min()).days) if dates.notna().any() else None
-
-		# Adherence metrics
-		if campaign_length_days and campaign_length_days > 0:
-			user_metrics['active_days_ratio'] = (user_metrics['active_days'] / campaign_length_days).clip(upper=1)
-		else:
-			# Normalize by own span, avoid division by zero
-			user_metrics['active_days_ratio'] = user_metrics.apply(lambda r: (r['active_days'] / max(1, r['span_days'])) if pd.notna(r['span_days']) and r['span_days'] > 0 else 1.0 if r['active_days'] > 0 else 0.0, axis=1)
-		# Dropout days (as inverse of adherence)
-		user_metrics['dropout_days'] = user_metrics['span_days']
-
-		# Engagement active/passive flag if activity metrics exist
-		metric_cols = [c for c in ['STEPS', 'KCALORIES', 'DURATION'] if c in df.columns]
-		if metric_cols:
-			agg = df.groupby('pid')[metric_cols].sum().reset_index()
-			user_metrics = user_metrics.merge(agg, on='pid', how='left')
-			user_metrics['engagement_active'] = (user_metrics[metric_cols].fillna(0).sum(axis=1) > 0).map({True: 'Active', False: 'Passive'})
-		else:
-			user_metrics['engagement_active'] = (user_metrics['engagement_count'] > 0).map({True: 'Active', False: 'Passive'})
-
-		# Map user-level metrics back to activity types presence
-		# Determine which users performed each activity type at least once
-		user_types = df.groupby('pid')['type'].apply(lambda s: sorted(pd.Series(s).dropna().unique().tolist())).reset_index().rename(columns={'type': 'types_list'})
-		user_metrics = user_metrics.merge(user_types, on='pid', how='left')
-
-		# Helper to compute metric by membership in type
-		def metric_by_type(metric_col: str) -> pd.DataFrame:
-			rows = []
-			for act_type, _ in df['type'].value_counts().items():
-				mask = user_metrics['types_list'].apply(lambda lst: isinstance(lst, list) and act_type in lst)
-				vals = user_metrics.loc[mask, metric_col]
-				if len(vals) == 0:
-					continue
-				rows.append({'activity_type': act_type, 'count_users': int(mask.sum()), 'mean': float(pd.Series(vals).mean()), 'median': float(pd.Series(vals).median())})
-			return pd.DataFrame(rows).sort_values('mean', ascending=False)
-
-		engagement_by_type = metric_by_type('engagement_count')
-		adherence_by_type = metric_by_type('active_days_ratio')
-
-		# Derive or fetch levels
-		levels_available = False
-		level_map = None
-		if 'desc_tasks' in csv_data and not csv_data['desc_tasks'].empty:
-			tasks_df = csv_data['desc_tasks']
-			possible_level_cols = [c for c in tasks_df.columns if c.lower() in ['level', 'difficulty', 'tier', 'stage', 'lvl']]
-			name_cols = [c for c in tasks_df.columns if c.lower() in ['rule', 'task', 'name', 'label']]
-			if possible_level_cols and name_cols:
-				lvl_col = possible_level_cols[0]
-				name_col = name_cols[0]
-				level_map = tasks_df[[name_col, lvl_col]].dropna()
-				level_map.columns = ['task_name', 'level']
-				levels_available = True
-		# If no explicit level, derive from points per activity (tertiles)
-		if not levels_available:
-			# Build per-activity points distribution
-			pts = df[['points']].copy()
-			if not pts.empty and pts['points'].notna().any():
-				q = pts['points'].quantile([0.33, 0.66]).fillna(0)
-				low, mid = q.iloc[0], q.iloc[1]
-				with pd.option_context('mode.chained_assignment', None):
-					df['derived_level'] = pd.cut(df['points'], bins=[-1e9, low, mid, 1e12], labels=['Low', 'Medium', 'High'])
-				levels_available = True
-				level_source = 'derived_level'
-			else:
-				level_source = None
-		else:
-			level_source = 'mapped_level'
-
-		# If level_map exists, attempt to map from rewardedParticipations 'rule' field
-		if levels_available and level_map is not None:
-			# Ensure detailed_rewards exists
-			if 'detailed_rewards' not in df.columns and 'rewardedParticipations' in df.columns:
-				with pd.option_context('mode.chained_assignment', None):
-					df['detailed_rewards'] = df['rewardedParticipations'].apply(extract_detailed_rewards)
-			# Extract rule/task name when present
-			def get_rule_name(reward_list):
-				if not isinstance(reward_list, list):
-					return None
-				for r in reward_list:
-					if isinstance(r, dict) and 'rule' in r and pd.notna(r['rule']):
-						return str(r['rule']).strip()
-				return None
-			with pd.option_context('mode.chained_assignment', None):
-				df['task_name'] = df.get('detailed_rewards', [[]]).apply(get_rule_name)
-			mapped = df.merge(level_map, on='task_name', how='left')
-			with pd.option_context('mode.chained_assignment', None):
-				mapped['level'] = mapped['level'].fillna('Unknown')
-			level_source = 'level'
-		else:
-			mapped = df.copy()
-			if levels_available and level_source == 'derived_level':
-				mapped['level'] = mapped['derived_level']
-
-		# Build per-user level assignments (most frequent level)
-		levels_summary = None
-		if levels_available and 'level' in mapped.columns:
-			lvl_user = mapped.dropna(subset=['level']).groupby(['pid', 'level']).size().reset_index(name='n')
-			# pick most frequent level per user
-			idx = lvl_user.groupby('pid')['n'].idxmax()
-			user_level = lvl_user.loc[idx, ['pid', 'level']]
-			user_metrics = user_metrics.merge(user_level, on='pid', how='left')
-			levels_summary = user_metrics.groupby('level').agg(
-				users=('pid', 'nunique'),
-				mean_engagement=('engagement_count', 'mean'),
-				median_engagement=('engagement_count', 'median'),
-				mean_adherence=('active_days_ratio', 'mean'),
-				median_adherence=('active_days_ratio', 'median')
-			).reset_index()
-
-		# Correlations with points
-		corr_spear_eng = stats.spearmanr(user_metrics['avg_points'].fillna(0), user_metrics['engagement_count'].fillna(0)) if len(user_metrics) > 1 else (None, None)
-		corr_spear_adh = stats.spearmanr(user_metrics['avg_points'].fillna(0), user_metrics['active_days_ratio'].fillna(0)) if len(user_metrics) > 1 else (None, None)
-
-		# Save statistics report
-		ensure_dir(OUTPUT_STATISTICS_DIR)
-		report_path = os.path.join(OUTPUT_STATISTICS_DIR, 'tasks_points_levels_impact.txt')
-		with open(report_path, 'w') as f:
-			f.write("Analysis: Impact of Task Types, Points, and Levels on Engagement and Adherence\n\n")
-			f.write("User-level metric definitions:\n")
-			f.write("- engagement_count: total activities per user\n")
-			f.write("- active_days_ratio: active (unique) days divided by campaign length or user span\n")
-			f.write("\n-- By Activity Type --\n")
-			if engagement_by_type is not None and not engagement_by_type.empty:
-				f.write("Top activity types by mean engagement_count:\n")
-				f.write(engagement_by_type.to_string(index=False))
-				f.write("\n\n")
-			if adherence_by_type is not None and not adherence_by_type.empty:
-				f.write("Top activity types by mean active_days_ratio:\n")
-				f.write(adherence_by_type.to_string(index=False))
-				f.write("\n\n")
-			f.write("-- Correlation with Points --\n")
-			if corr_spear_eng[0] is not None:
-				f.write(f"Spearman rho (avg_points vs engagement_count): {corr_spear_eng.correlation:.3f}, p={corr_spear_eng.pvalue:.4f}\n")
-				f.write(f"Spearman rho (avg_points vs active_days_ratio): {corr_spear_adh.correlation:.3f}, p={corr_spear_adh.pvalue:.4f}\n")
-			else:
-				f.write("Insufficient data for correlation analysis.\n")
-			if levels_summary is not None and not levels_summary.empty:
-				f.write("\n-- By Level --\n")
-				f.write(levels_summary.to_string(index=False))
-		logger.info(f"Saved tasks/points/levels impact report to {report_path}")
-
-		# Visualizations
-		ensure_dir(OUTPUT_VISUALIZATIONS_DIR)
-		# Engagement by activity type (top N to keep readable)
-		try:
-			if engagement_by_type is not None and not engagement_by_type.empty:
-				plot_df = engagement_by_type.head(20)
-				def plot_engagement_by_type():
-					plt.bar(plot_df['activity_type'], plot_df['mean'], color='steelblue')
-					plt.xticks(rotation=45, ha='right')
-					plt.ylabel('Mean engagement_count')
-					plt.title('Engagement by Activity Type (Top 20)')
-				create_and_save_figure(
-					plot_engagement_by_type,
-					os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'engagement_by_activity_type.png'),
-					figsize=(14, 8)
-				)
-		except Exception as e:
-			logger.error(f"Error plotting engagement_by_activity_type: {e}")
-		# Adherence by activity type
-		try:
-			if adherence_by_type is not None and not adherence_by_type.empty:
-				plot_df = adherence_by_type.head(20)
-				def plot_adherence_by_type():
-					plt.bar(plot_df['activity_type'], plot_df['mean'], color='seagreen')
-					plt.xticks(rotation=45, ha='right')
-					plt.ylabel('Mean active_days_ratio')
-					plt.title('Adherence by Activity Type (Top 20)')
-				create_and_save_figure(
-					plot_adherence_by_type,
-					os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'adherence_by_activity_type.png'),
-					figsize=(14, 8)
-				)
-		except Exception as e:
-			logger.error(f"Error plotting adherence_by_activity_type: {e}")
-
-		# Scatter: avg_points vs engagement/adherence
-		try:
-			if not user_metrics.empty:
-				def plot_scatter(x, y, x_label, y_label, title):
-					plt.scatter(user_metrics[x], user_metrics[y], alpha=0.6, c=user_metrics.get('engagement_count', 1), cmap=REGRESSION_COLORMAP)
-					plt.xlabel(x_label)
-					plt.ylabel(y_label)
-					plt.title(title)
-				create_and_save_figure(
-					lambda: plot_scatter('avg_points', 'engagement_count', 'Avg points per activity', 'Engagement count', 'Engagement vs Avg Points'),
-					os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'engagement_vs_avg_points.png'),
-					figsize=(8, 6)
-				)
-				create_and_save_figure(
-					lambda: plot_scatter('avg_points', 'active_days_ratio', 'Avg points per activity', 'Active days ratio', 'Adherence vs Avg Points'),
-					os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'adherence_vs_avg_points.png'),
-					figsize=(8, 6)
-				)
-		except Exception as e:
-			logger.error(f"Error plotting points scatter: {e}")
-
-		# By level (if available)
-		try:
-			if levels_summary is not None and not levels_summary.empty:
-				def plot_by_level(metric_col, ylabel, title, fname):
-					plt.bar(levels_summary['level'].astype(str), levels_summary[metric_col], color='mediumpurple')
-					plt.xlabel('Level')
-					plt.ylabel(ylabel)
-					plt.title(title)
-				create_and_save_figure(
-					lambda: plot_by_level('mean_engagement', 'Mean engagement_count', 'Engagement by Level', os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'engagement_by_level.png')),
-					os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'engagement_by_level.png'),
-					figsize=(8, 6)
-				)
-				create_and_save_figure(
-					lambda: plot_by_level('mean_adherence', 'Mean active_days_ratio', 'Adherence by Level', os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'adherence_by_level.png')),
-					os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'adherence_by_level.png'),
-					figsize=(8, 6)
-				)
-		except Exception as e:
-			logger.error(f"Error plotting by level: {e}")
-
-		logger.info("Completed impact analysis of task types, points, and levels")
-	except Exception as e:
-		logger.error(f"Error in analyze_task_points_levels_impact: {e}")
-		import traceback
-		logger.error(f"Traceback: {traceback.format_exc()}")
-
 
 def analyze_geofence_data(json_data):
 	"""Analyze geofence data from JSON files
@@ -3016,19 +2850,14 @@ def analyze_geofence_data(json_data):
 
 	for key, data in json_data.items():
 		# Debug: Print key and data type
-		logger.info(f"Processing key: {key}, data type: {type(data)}")
-
 		if 'geofence' in key.lower() and isinstance(data, pd.DataFrame):
-			logger.info(f"Found geofence data in key: {key}")
 			# Extract user ID from the key if possible
 			try:
 				# Assuming key format is like "user_123_geofence"
 				parts = key.split('_')
-				logger.info(f"Split key into parts: {parts}")
 
 				if len(parts) >= 3 and parts[0] == 'user':
 					user_id = parts[1]
-					logger.info(f"Extracted user_id: {user_id}")
 
 					# Add user_id column to the DataFrame
 					data_copy = data.copy()
@@ -3046,27 +2875,14 @@ def analyze_geofence_data(json_data):
 								data_copy[col] = 0
 
 					geofence_dfs.append(data_copy)
-					logger.info(f"Added geofence data for user {user_id} to geofence_dfs")
 				else:
 					logger.warning(f"Key {key} does not match expected format 'user_X_geofence'")
 			except (IndexError, ValueError) as e:
 				logger.warning(f"Error extracting user ID from key {key}: {e}")
 
 	# Debug: Check if geofence_dfs is empty
-	logger.info(f"geofence_dfs has {len(geofence_dfs)} dataframes")
 	if not geofence_dfs:
 		logger.warning("No geofence data found, geofence_dfs is empty")
-
-		# Debug: Check each key in json_data to see why no geofence data was found
-		for key, data in json_data.items():
-			logger.info(f"Key: {key}, Type: {type(data)}")
-			if isinstance(data, pd.DataFrame):
-				logger.info(f"  DataFrame columns: {list(data.columns)}")
-			elif isinstance(data, dict):
-				logger.info(f"  Dictionary keys: {list(data.keys())}")
-			else:
-				logger.info(f"  Data type: {type(data)}")
-
 		return
 
 	# Combine all geofence dataframes
@@ -3076,10 +2892,21 @@ def analyze_geofence_data(json_data):
 	if 'TIMESTAMP' in all_geofence_data.columns:
 		all_geofence_data['TIMESTAMP'] = pd.to_datetime(all_geofence_data['TIMESTAMP'], errors='coerce')
 
+	# Ensure numeric dtypes for geofence measures to avoid errors during quantiles/plots
+	for col in ['LATITUDE', 'LONGITUDE', 'ALTITUDE', 'SPEED', 'ERROR']:
+		if col in all_geofence_data.columns:
+			all_geofence_data[col] = pd.to_numeric(all_geofence_data[col], errors='coerce')
+
+	# Drop rows with missing SPEED for outlier computation
+	speed_series = all_geofence_data['SPEED'].dropna()
+	if speed_series.empty:
+		logger.warning("No valid SPEED values in geofence data; skipping geofence analysis")
+		return
+
 	# Clean data: Remove extreme outliers in SPEED
 	# Calculate Q1, Q3 and IQR for SPEED
-	Q1 = all_geofence_data['SPEED'].quantile(0.25)
-	Q3 = all_geofence_data['SPEED'].quantile(0.75)
+	Q1 = speed_series.quantile(0.25)
+	Q3 = speed_series.quantile(0.75)
 	IQR = Q3 - Q1
 
 	# Define bounds for outliers (using 3*IQR as a more lenient threshold)
@@ -3088,15 +2915,13 @@ def analyze_geofence_data(json_data):
 
 	# Filter out extreme outliers
 	filtered_geofence_data = all_geofence_data[
-		(all_geofence_data['SPEED'] >= lower_bound) & 
+		(all_geofence_data['SPEED'] >= lower_bound) &
 		(all_geofence_data['SPEED'] <= upper_bound)
-	]
+	].copy()
 
 	# Log how many outliers were removed
 	outliers_count = len(all_geofence_data) - len(filtered_geofence_data)
 	if outliers_count > 0:
-		logger.info(f"Removed {outliers_count} outliers from geofence data")
-
 		# Generate descriptive statistics for geofence data
 		stats_file = os.path.join(OUTPUT_STATISTICS_DIR, 'geofence_statistics.txt')
 		with open(stats_file, 'w') as f:
@@ -3118,31 +2943,26 @@ def analyze_geofence_data(json_data):
 				f.write(f"  Median: {filtered_geofence_data[col].median():.2f}\n")
 				f.write(f"  Std Dev: {filtered_geofence_data[col].std():.2f}\n\n")
 
-		logger.info(f"Geofence statistics saved to {stats_file}")
-
-		# Speed Distribution visualization removed as requested
-
-		# Altitude Distribution visualization removed as requested
-
-		# Error Margin Analysis visualization removed as requested
-
-		# Speed vs. Error Correlation visualization removed as requested
-
-		# Location Distribution removed as requested
-
 		# 6. Temporal analysis (if timestamp data is available)
 		if 'TIMESTAMP' in filtered_geofence_data.columns and not filtered_geofence_data['TIMESTAMP'].isna().all():
 			# Add hour of day column
 			filtered_geofence_data['hour_of_day'] = filtered_geofence_data['TIMESTAMP'].dt.hour
+			# Ensure hour_of_day is an ordered categorical with all hours 0-23 so plots show all ticks
+			filtered_geofence_data['hour_of_day'] = pd.Categorical(
+				filtered_geofence_data['hour_of_day'], categories=list(range(24)), ordered=True
+			)
 
 			def plot_hourly_activity():
 				plt.figure(figsize=(12, 6))
 				hourly_counts = filtered_geofence_data['hour_of_day'].value_counts().sort_index()
-				sns.barplot(x=hourly_counts.index, y=hourly_counts.values)
+				# Ensure all hours 0-23 are represented, even if count is 0
+				hourly_counts = hourly_counts.reindex(range(24), fill_value=0)
+				sns.barplot(x=list(hourly_counts.index), y=list(hourly_counts.values))
 				plt.title('Geofence Activity by Hour of Day')
 				plt.xlabel('Hour of Day')
 				plt.ylabel('Number of Records')
 				plt.xticks(range(0, 24))
+				plt.xlim(-0.5, 23.5)
 				plt.grid(True, alpha=0.3)
 
 			create_and_save_figure(
@@ -3153,23 +2973,18 @@ def analyze_geofence_data(json_data):
 			# Speed by hour of day
 			def plot_speed_by_hour():
 				plt.figure(figsize=(12, 6))
-				sns.boxplot(data=filtered_geofence_data, x='hour_of_day', y='SPEED')
+				sns.boxplot(data=filtered_geofence_data, x='hour_of_day', y='SPEED', order=list(range(24)))
 				plt.title('Speed by Hour of Day')
 				plt.xlabel('Hour of Day')
 				plt.ylabel('Speed')
 				plt.xticks(range(0, 24))
+				plt.xlim(-0.5, 23.5)
 				plt.grid(True, alpha=0.3)
 
 			create_and_save_figure(
 				plot_speed_by_hour,
 				os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'geofence_speed_by_hour.png')
 			)
-
-			# Day of week analysis visualization removed as requested
-
-			# Monthly activity patterns visualization removed as requested
-
-			# Speed vs. Altitude correlation visualization removed as requested
 
 		# 10. Movement trajectory visualization (if timestamps are available)
 		if 'TIMESTAMP' in filtered_geofence_data.columns and not filtered_geofence_data['TIMESTAMP'].isna().all():
@@ -3195,7 +3010,6 @@ def analyze_geofence_data(json_data):
 			except Exception as e:
 				logger.warning(f"Could not create movement trajectory plot: {e}")
 
-		# Location Heatmap visualization removed as requested
 
 		# 12. 3D visualization of geofence data
 		try:
@@ -3221,47 +3035,143 @@ def analyze_geofence_data(json_data):
 				os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'geofence_3d_visualization.png')
 			)
 		except Exception as e:
-			logger.warning(f"Could not create 3D visualization: {e}")
-
-		# 13. Try to create an interactive map using folium if available
-		try:
-			import folium
-			from folium.plugins import HeatMap
-
-			# Create a map centered at the mean of the coordinates
-			center_lat = filtered_geofence_data['LATITUDE'].mean()
-			center_lon = filtered_geofence_data['LONGITUDE'].mean()
-
-			m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
-
-			# Add points to the map
-			for _, row in filtered_geofence_data.iterrows():
-				folium.CircleMarker(
-					location=[row['LATITUDE'], row['LONGITUDE']],
-					radius=5,
-					color='blue',
-					fill=True,
-					fill_color='blue',
-					fill_opacity=0.7,
-					popup=f"Speed: {row['SPEED']}, Altitude: {row['ALTITUDE']}"
-				).add_to(m)
-
-			# Add a heatmap layer
-			heat_data = [[row['LATITUDE'], row['LONGITUDE']] for _, row in filtered_geofence_data.iterrows()]
-			HeatMap(heat_data).add_to(m)
-
-			# Save the map
-			map_file = os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'geofence_interactive_map.html')
-			m.save(map_file)
-			logger.info(f"Interactive map saved to {map_file}")
-		except ImportError:
-			logger.warning("Folium not available, skipping interactive map visualization")
-		except Exception as e:
-			logger.warning(f"Could not create interactive map: {e}")
-
-		logger.info("Completed geofence data analysis")
+			logger.warning(f"Could not create 3D visualization: {e}")	
 	else:
 		logger.warning("No geofence data available for analysis")
+
+def analyze_day_aggregate_steps(json_data: Dict[str, Union[pd.DataFrame, Dict]], campaign_metrics: Optional[Dict] = None) -> Optional[pd.DataFrame]:
+	"""
+	Parse DAY_AGGREGATE JSON files (and RUN/WALK variants) to compute and plot steps trend per user and overall.
+
+	Sources supported:
+	- Separate files like 'user_<id>_day_aggregate*.json' loaded as DataFrames in json_data.
+	- Combined 'user_<id>_all_data.json' dicts containing lists under keys 'day_aggregate', 'day_aggregate_walk', 'day_aggregate_run'.
+
+	Outputs:
+	- Saves one figure under OUTPUT_VISUALIZATIONS_DIR:
+	  * steps_trend.png          (total steps across users per day over full campaign date range)
+	- Returns the combined DataFrame with columns: ['date', 'user_id', 'steps']
+	"""
+	try:
+		records: List[pd.DataFrame] = []
+
+		def _extract_from_df(df: pd.DataFrame, user_id: str) -> Optional[pd.DataFrame]:
+			if df is None or df.empty:
+				return None
+			local = df.copy()
+			# Determine date column preference: X_DATE, DATE, START_DATE, then END_DATE
+			date_candidates = ['X_DATE', 'DATE', 'START_DATE', 'END_DATE']
+			date_col = next((c for c in date_candidates if c in local.columns), None)
+			if date_col is None:
+				return None
+			# Parse to datetime.date
+			local['__date'] = pd.to_datetime(local[date_col], errors='coerce').dt.date
+			# Fallback: if parsing failed and there is an END_DATE, try it
+			if local['__date'].isna().all() and 'END_DATE' in local.columns and date_col != 'END_DATE':
+				local['__date'] = pd.to_datetime(local['END_DATE'], errors='coerce').dt.date
+			# Determine steps column (support STEPS_SUM, STEP_SUM, or STEPS)
+			steps_candidates = ['STEPS_SUM', 'STEP_SUM', 'STEPS']
+			steps_col = next((c for c in steps_candidates if c in local.columns), None)
+			if steps_col is None:
+				return None
+			out = local[['__date', steps_col]].dropna(subset=['__date']).rename(columns={steps_col: 'steps'})
+			# Coerce steps to numeric to avoid string concatenation during sum
+			out['steps'] = pd.to_numeric(out['steps'], errors='coerce').fillna(0)
+			if out.empty:
+				return None
+			out['user_id'] = str(user_id)
+			return out
+
+		for key, data in json_data.items():
+			k_lower = key.lower()
+			# Try to extract user id from key names like 'user_443_day_aggregate' or 'user_443_all_data'
+			m = re.match(r"user_(\d+)_", key)
+			user_id = m.group(1) if m else key
+
+			if isinstance(data, pd.DataFrame):
+				if 'day_aggregate' in k_lower:
+					df_out = _extract_from_df(data, user_id)
+					if df_out is not None:
+						records.append(df_out)
+			elif isinstance(data, dict) and k_lower.startswith('user_') and k_lower.endswith('_all_data'):
+				for section in ['day_aggregate', 'day_aggregate_walk', 'day_aggregate_run']:
+					section_data = data.get(section)
+					if isinstance(section_data, list) and section_data:
+						try:
+							df_section = pd.DataFrame(section_data)
+							df_out = _extract_from_df(df_section, user_id)
+							if df_out is not None:
+								records.append(df_out)
+						except Exception as e:
+							logger.warning(f"Failed parsing section '{section}' for {key}: {e}")
+
+		if not records:
+			logger.warning("No DAY_AGGREGATE step data found in JSON inputs; skipping daily steps plots")
+			return None
+
+		combined = pd.concat(records, ignore_index=True)
+		# Aggregate across potential duplicates and variants (run/walk/base)
+		combined = combined.groupby(['__date', 'user_id'], as_index=False)['steps'].sum()
+		combined = combined.rename(columns={'__date': 'date'})
+		# Ensure numeric dtype for steps
+		combined['steps'] = pd.to_numeric(combined['steps'], errors='coerce').fillna(0)
+		# Sort by date then user
+		combined = combined.sort_values(['date', 'user_id'])
+
+		# Build full campaign date range
+		def _parse_ts(val):
+			return pd.to_datetime(val, errors='coerce')
+
+		inferred = combined.groupby('date', as_index=False)['steps'].sum()
+		min_ts = _parse_ts(inferred['date']).min()
+		max_ts = _parse_ts(inferred['date']).max()
+		start_ts = None
+		end_ts = None
+		if campaign_metrics and isinstance(campaign_metrics, dict):
+			start_ts = _parse_ts(campaign_metrics.get('start_date'))
+			end_ts = _parse_ts(campaign_metrics.get('end_date'))
+		# Fallbacks if campaign dates missing
+		if pd.isna(start_ts) or start_ts is None:
+			start_ts = min_ts
+		if pd.isna(end_ts) or end_ts is None:
+			end_ts = max_ts
+		# Ensure valid range
+		if pd.isna(start_ts) or pd.isna(end_ts) or start_ts > end_ts:
+			start_ts, end_ts = min_ts, max_ts
+		full_range = pd.date_range(start=start_ts.normalize(), end=end_ts.normalize(), freq='D')
+
+		# Plot: total steps across users per day (reindexed to full range)
+		total = inferred.copy()
+		total['date'] = pd.to_datetime(total['date'])
+		total = total.set_index('date').reindex(full_range).fillna(0).rename_axis('date').reset_index()
+
+		def plot_total():
+			ax = plt.gca()
+			ax.plot(total['date'], total['steps'], marker='o')
+			ax.set_title('Steps Trend (All Users)')
+			ax.set_xlabel('Date')
+			ax.set_ylabel('Steps')
+			# Explicitly show every campaign date on x-axis
+			try:
+				# ticks as full daily range
+				ticks = pd.to_datetime(list(full_range))
+				labels = [d.strftime('%Y-%m-%d') for d in ticks]
+				ax.set_xticks(ticks)
+				ax.set_xticklabels(labels, rotation=90, ha='center')
+				ax.set_xlim(ticks[0], ticks[-1])
+			except Exception:
+				plt.xticks(rotation=90)
+
+		create_and_save_figure(
+			plot_total,
+			os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'steps_trend.png'),
+			figsize=PLOT_FIGSIZE_ACTIVITY_TYPES_STACKED
+		)
+
+		return combined
+	except Exception as e:
+		logger.error(f"Error analyzing DAY_AGGREGATE steps: {e}")
+		return None
 
 def generate_analysis_report(csv_data, json_data, activities, campaign_metrics, dropout_metrics, joining_metrics=None):
 	"""
@@ -3278,11 +3188,10 @@ def generate_analysis_report(csv_data, json_data, activities, campaign_metrics, 
     Returns:
         str: Path to the generated report file.
     """
-	logger.info("generate_analysis_report invoked")
+
 	# Ensure data_analysis directory exists
 	data_analysis_dir = ensure_dir(os.path.join(PROJECT_ROOT, 'data_analysis'))
 	report_path = os.path.join(data_analysis_dir, 'analysis_report.txt')
-	logger.info(f"Generating analysis report at {report_path}")
 
 
 	# Lists to track performed and skipped analyses
@@ -3309,88 +3218,8 @@ def generate_analysis_report(csv_data, json_data, activities, campaign_metrics, 
 			f.write("✗ No JSON data loaded\n")
 			skipped_analyses.append(("JSON data loading", "No JSON files found or error during loading"))
 
-		f.write("\n2. Activities Analysis\n")
-		f.write("---------------------\n")
-		if activities is not None:
-			f.write("✓ Activities analysis performed successfully\n")
-			performed_analyses.append("Activities analysis")
-
-
-
-			# Check if dropout analysis was performed
-			if dropout_metrics:
-				f.write("✓ User dropout analysis performed\n")
-				performed_analyses.append("User dropout analysis")
-			else:
-				reason = "Insufficient activity data to calculate dropout rates"
-				f.write("✗ User dropout analysis NOT performed\n")
-				f.write(f"   - Reason: {reason}\n")
-				skipped_analyses.append(("User dropout analysis", reason))
-
-			# Check if joining analysis was performed
-			if joining_metrics:
-				f.write("✓ User joining rates analysis performed\n")
-				performed_analyses.append("User joining rates analysis")
-			else:
-				reason = "Insufficient activity data or missing campaign start date to calculate joining rates"
-				f.write("✗ User joining rates analysis NOT performed\n")
-				f.write(f"   - Reason: {reason}\n")
-				skipped_analyses.append(("User joining rates analysis", reason))
-
-			# Check if campaign metrics analysis was performed
-			if campaign_metrics:
-				f.write("✓ Campaign metrics analysis performed\n")
-				performed_analyses.append("Campaign metrics analysis")
-			else:
-				reason = "Insufficient data to determine campaign start and end dates"
-				f.write("✗ Campaign metrics analysis NOT performed\n")
-				f.write(f"   - Reason: {reason}\n")
-				skipped_analyses.append(("Campaign metrics analysis", reason))
-		else:
-			reason = "No activity data available or error during analysis"
-			f.write("✗ Activities analysis NOT performed\n")
-			f.write(f"   - Reason: {reason}\n")
-			skipped_analyses.append(("Activities analysis", reason))
-
 		f.write("\n3. User Data Analysis\n")
 		f.write("--------------------\n")
-		if json_data:
-			performed_analyses.append("User data analysis")
-
-			# Check if user data contains specific types of data
-			has_movement_data = False
-
-			# First check if any filenames contain movement descriptors
-			movement_descriptors = ['walk', 'run', 'cycle', 'bike']
-			for key in json_data.keys():
-				key_lower = key.lower()
-				if any(descriptor in key_lower for descriptor in movement_descriptors):
-					has_movement_data = True
-					break
-
-			# If no movement data found in filenames, check in the data structure
-			if not has_movement_data:
-				for user_data in json_data.values():
-					if 'activities' in user_data:
-						for activity in user_data['activities']:
-							if activity.get('gameDescriptor') in ['WALK', 'RUN', 'CYCLE']:
-								has_movement_data = True
-
-			if has_movement_data:
-				f.write("✓ Movement data analysis performed (steps, calories, etc.)\n")
-				performed_analyses.append("Movement data analysis")
-			else:
-				reason = "No movement data (WALK, RUN, CYCLE) found in user activities"
-				f.write("✗ Movement data analysis NOT performed\n")
-				f.write(f"   - Reason: {reason}\n")
-				skipped_analyses.append(("Movement data analysis", reason))
-
-		else:
-			reason = "No JSON user data available"
-			f.write("✗ User data analysis NOT performed\n")
-			f.write(f"   - Reason: {reason}\n")
-			skipped_analyses.append(("User data analysis", reason))
-
 
 		f.write("\n4. Summary\n")
 		f.write("---------\n")
@@ -3498,8 +3327,7 @@ def generate_analysis_report(csv_data, json_data, activities, campaign_metrics, 
 		expected_statistics = [
 			"campaign_summary.txt",
 			"dropout_analysis.txt",
-			"task_completion_analysis.txt",
-			"tasks_points_levels_impact.txt"
+			"task_completion_analysis.txt"
 		]
 
 		missing_statistics = [s for s in expected_statistics if s not in statistics_files]
@@ -3515,7 +3343,6 @@ def generate_analysis_report(csv_data, json_data, activities, campaign_metrics, 
 		else:
 			f.write("No analyses were skipped.\n")
 
-	logger.info(f"Analysis report generated at {report_path}")
 	return report_path
 
 def create_complete_report(csv_data, json_data, activities=None):
@@ -3544,15 +3371,11 @@ def create_complete_report(csv_data, json_data, activities=None):
 def main():
 	"""Main function to run the analysis"""
 	try:
-		logger.info("Starting data analysis")
-
 		# Ensure output directories exist
 		ensure_output_dirs()
-		logger.info(f"Output directories ready: {OUTPUT_VISUALIZATIONS_DIR} and {OUTPUT_STATISTICS_DIR}")
 
 		# Load data
 		try:
-			logger.info("Loading Excel files...")
 			csv_data = load_excel_files()
 			if not csv_data:
 				logger.warning("No Excel data loaded")
@@ -3563,7 +3386,6 @@ def main():
 			csv_data = {}
 
 		try:
-			logger.info("Loading JSON files...")
 			json_data = load_json_files()
 			if not json_data:
 				logger.warning("No JSON data loaded")
@@ -3575,11 +3397,9 @@ def main():
 
 		# Analyze activities data
 		try:
-			logger.info("Analyzing activities data...")
 			result = analyze_activities(csv_data, json_data)
 			if result:
 				activities, unique_users_count, dropout_metrics, joining_metrics, campaign_metrics = result
-				logger.info(f"Activities analysis complete: {unique_users_count} users")
 			else:
 				logger.warning("Activities analysis returned no results")
 				activities = None
@@ -3598,44 +3418,33 @@ def main():
 
 		# Analyze geofence data
 		try:
-			logger.info("Analyzing geofence data...")
 			# Debug: Check if json_data is empty
-			logger.info(f"json_data has {len(json_data)} items before calling analyze_geofence_data")
 			analyze_geofence_data(json_data)
-			logger.info("Geofence data analysis complete")
 		except Exception as e:
 			logger.error(f"Error analyzing geofence data: {e}")
 			# Debug: Print the full error traceback
 			import traceback
 			logger.error(f"Error traceback: {traceback.format_exc()}")
 
+		# Analyze daily steps from DAY_AGGREGATE files
+		try:
+			analyze_day_aggregate_steps(json_data, campaign_metrics)
+		except Exception as e:
+			logger.error(f"Error analyzing daily steps from DAY_AGGREGATE: {e}")
+
 		# Analyze visualizations, challenges, and tasks
 		try:
-			logger.info("Analyzing visualizations, challenges, and tasks...")
 			analyze_visualizations_challenges_tasks(csv_data)
-			logger.info("Visualizations, challenges, and tasks analysis complete")
 		except Exception as e:
 			logger.error(f"Error analyzing visualizations, challenges, and tasks: {e}")
 
-		# Analyze impact of task types, points, and levels on engagement and adherence
-		try:
-			logger.info("Analyzing impact of task types, points, and levels on engagement and adherence...")
-			activities_df_to_pass = activities if isinstance(activities, pd.DataFrame) else (activities[0] if isinstance(activities, tuple) and len(activities) > 0 else None)
-			campaign_metrics_to_pass = campaign_metrics
-			analyze_task_points_levels_impact(csv_data, activities_df_to_pass, campaign_metrics_to_pass)
-			logger.info("Impact analysis complete")
-		except Exception as e:
-			logger.error(f"Error analyzing task types/points/levels impact: {e}")
-
 		# Generate analysis report
 		try:
-			logger.info("Calling create_complete_report function")
 			# Pass the entire result tuple to create_complete_report
 			if result:
 				report_path = create_complete_report(csv_data, json_data, result)
 			else:
 				report_path = create_complete_report(csv_data, json_data, activities)
-			logger.info(f"Report generation completed, report saved to {report_path}")
 		except Exception as e:
 			logger.error(f"Error generating complete report: {e}")
 			report_path = None
@@ -3653,6 +3462,12 @@ def main():
 		if campaign_metrics:
 			try:
 				print(f"- Campaign length: {campaign_metrics['length_days']} days (from {campaign_metrics['start_date']} to {campaign_metrics['end_date']})")
+				# Active/Passive users summary (by rewards)
+				act = campaign_metrics.get('active_users_count') if isinstance(campaign_metrics, dict) else None
+				pas = campaign_metrics.get('passive_users_count') if isinstance(campaign_metrics, dict) else None
+				if act is not None and pas is not None:
+					print(f"- Active users (rewarded): {act}")
+					print(f"- Passive users (enrolled, never rewarded): {pas}")
 			except (KeyError, TypeError) as e:
 				logger.error(f"Error accessing campaign metrics: {e}")
 
@@ -3677,9 +3492,6 @@ def main():
 	except Exception as e:
 		logger.error(f"Unexpected error in main function: {e}")
 		print(f"An error occurred during analysis. See log file for details.")
-
-	# Log the completion of the analysis
-	logger.info("Analysis complete with visualizations and statistics generated")
 
 	# Only print a summary of the visualizations to keep the output concise
 	print("\nVisualization categories:")

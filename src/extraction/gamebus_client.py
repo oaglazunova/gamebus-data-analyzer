@@ -78,15 +78,12 @@ class GameBusClient:
                     }
 
                     options_response = requests.options(base_url, headers=options_headers, timeout=REQUEST_TIMEOUT)
-                    logger.info(f"OPTIONS response status for token URL: {options_response.status_code}")
                 except requests.exceptions.RequestException as e:
                     logger.warning(f"OPTIONS request for token URL failed, continuing anyway: {e}")
 
-                logger.info(f"Requesting token, attempt {retry_count + 1}/{max_retries}")
                 response = requests.post(self.token_url, headers=headers, data=payload, timeout=REQUEST_TIMEOUT)
                 response.raise_for_status()
                 token = response.json().get("access_token")
-                logger.info("Token fetched successfully")
                 return token
             except requests.exceptions.RequestException as e:
                 retry_count += 1
@@ -142,7 +139,6 @@ class GameBusClient:
         try:
             # Extract the base URL without query parameters for OPTIONS request
             base_url = url.split('?')[0]
-            logger.info(f"Making OPTIONS request to: {base_url}")
 
             # Headers for OPTIONS request
             options_headers = {
@@ -155,13 +151,8 @@ class GameBusClient:
             # Make the OPTIONS request
             options_response = requests.options(base_url, headers=options_headers, timeout=REQUEST_TIMEOUT)
 
-            # Log response status and headers for debugging
-            logger.info(f"OPTIONS response status: {options_response.status_code}")
-            logger.debug(f"OPTIONS response headers: {options_response.headers}")
-
             # Check if the OPTIONS request was successful
             if options_response.status_code == 200:
-                logger.info("OPTIONS request successful")
                 return True
             else:
                 logger.warning(f"OPTIONS request failed with status code: {options_response.status_code}")
@@ -190,7 +181,6 @@ class GameBusClient:
             "Referer": "https://base.healthyw8.gamebus.eu/",
             "Accept": "application/json, text/plain, */*"
         }
-        logger.info(f"Fetching paginated data from URL: {data_url}")
 
         all_data = []
         raw_responses = []  # Store raw JSON responses
@@ -206,19 +196,11 @@ class GameBusClient:
             retry_count = 0
             success = False
 
-            logger.info(f"Fetching page {page} from URL: {paginated_url}")
-
             while retry_count < MAX_RETRIES and not success and (time.time() - start_time) < max_time:
                 try:
                     # Make OPTIONS request first to mimic browser behavior
                     self._make_options_request(paginated_url)
-
-                    logger.info(f"Requesting URL: {paginated_url}, attempt {retry_count + 1}/{MAX_RETRIES}")
                     response = requests.get(paginated_url, headers=headers, timeout=REQUEST_TIMEOUT)
-
-                    # Log response status and headers for debugging
-                    logger.info(f"Response status: {response.status_code}")
-
                     response.raise_for_status()
 
                     # Try to parse JSON response
@@ -239,10 +221,7 @@ class GameBusClient:
                         time.sleep(2 * retry_count)  # Exponential backoff
                         continue
 
-                    logger.info(f"Data fetched successfully for page {page}")
-
                     if not data:
-                        logger.info(f"Empty data returned for page {page}")
                         empty_pages_count += 1
                         page += 1
                         break
@@ -304,28 +283,24 @@ class GameBusClient:
                 logger.warning(f"Failed to get data for page {page} after all retries, stopping pagination")
                 break
 
-        # Log the reason for stopping pagination
-        if empty_pages_count >= max_empty_pages:
-            logger.info(f"Stopped pagination after {max_empty_pages} consecutive empty pages")
-        elif page >= max_pages:
-            logger.info(f"Stopped pagination after reaching maximum number of pages ({max_pages})")
-        elif (time.time() - start_time) >= max_time:
-            logger.info(f"Stopped pagination after reaching maximum time limit ({max_time} seconds)")
-
-        logger.info(f"Total data points fetched: {len(all_data)}")
         return all_data, raw_responses
 
     def get_user_id(self, token: str) -> Tuple[Optional[int], Optional[str]]:
         """
-        Get the user ID and email using the access token.
+        Retrieve the authenticated player's ID and email from GameBus.
+
+        Source:
+            GET USER_ID_URL (/users/current). The JSON response contains:
+              - player.id: the numeric Player ID used for all subsequent API calls
+              - email: the account email address
 
         Args:
-            token: Access token
+            token: OAuth access token
 
         Returns:
             Tuple containing:
-            - User ID or None if retrieval failed
-            - User email or None if not available
+            - Player ID (int) or None if retrieval failed
+            - User email (str) or None if not available
         """
         headers = {
             "Authorization": f"Bearer {token}",
@@ -338,14 +313,13 @@ class GameBusClient:
         retry_count = 0
         max_retries = MAX_RETRIES
         start_time = time.time()
-        max_time = 60  # Maximum time in seconds for the user ID retrieval process
+        max_time = 60  # Maximum time in seconds for the player ID retrieval process
 
         while retry_count < max_retries and (time.time() - start_time) < max_time:
             try:
                 # Make OPTIONS request first to mimic browser behavior
                 self._make_options_request(self.user_id_url)
 
-                logger.info(f"Requesting user ID, attempt {retry_count + 1}/{max_retries}")
                 response = requests.get(self.user_id_url, headers=headers, timeout=REQUEST_TIMEOUT)
                 response.raise_for_status()
                 user_data = response.json()
@@ -354,15 +328,14 @@ class GameBusClient:
 
                 # Validate that user_id is an integer
                 if not isinstance(user_id, int):
-                    logger.error(f"Invalid user ID format: {user_id}. Expected an integer.")
+                    logger.error(f"Invalid player ID format: {user_id}. Expected an integer.")
                     return None, None
 
-                logger.info(f"User ID ({user_id}) and email fetched successfully")
                 return user_id, user_email
             except requests.exceptions.RequestException as e:
                 retry_count += 1
                 if retry_count < max_retries:
-                    logger.warning(f"Failed to get user ID and email, attempt {retry_count}/{max_retries}: {e}")
+                    logger.warning(f"Failed to get player ID and email, attempt {retry_count}/{max_retries}: {e}")
 
                     # Determine sleep time based on error type
                     if hasattr(e, 'response') and e.response is not None:
@@ -389,14 +362,14 @@ class GameBusClient:
 
                     time.sleep(sleep_time)
                 else:
-                    logger.error(f"Failed to get user ID and email after {max_retries} attempts: {e}")
+                    logger.error(f"Failed to get player ID and email after {max_retries} attempts: {e}")
                     if hasattr(e, 'response') and e.response is not None:
                         logger.error(f"Response status code: {e.response.status_code}")
                         logger.error(f"Response content: {e.response.text[:500]}...")
                     return None, None
 
         # If we've exhausted all retries or exceeded max time
-        logger.error(f"Failed to get user ID and email after {retry_count} attempts or {max_time} seconds")
+        logger.error(f"Failed to get player ID and email after {retry_count} attempts or {max_time} seconds")
         return None, None
 
     def get_user_data(self, token: str, user_id: int, game_descriptor: str, 
@@ -406,7 +379,7 @@ class GameBusClient:
 
         Args:
             token: Access token
-            user_id: User ID (must be an integer)
+            user_id: Player ID (must be an integer)
             game_descriptor: Type of data to retrieve (e.g., "GEOFENCE", "LOG_MOOD")
             page_size: Number of items per page
             try_all_descriptors: If True, try all valid game descriptors if the specified one doesn't return data
@@ -419,19 +392,17 @@ class GameBusClient:
         """
         # Validate that user_id is an integer
         if not isinstance(user_id, int):
-            logger.error(f"Invalid user ID format: {user_id}. Expected an integer.")
+            logger.error(f"Invalid player ID format: {user_id}. Expected an integer.")
             return [], game_descriptor, []
+
         # Create a cache key based on user_id and game_descriptor
         cache_key = f"{user_id}_{game_descriptor}"
 
         # Check if data is already in cache
         if cache_key in self._cache:
-            logger.info(f"Using cached data for user {user_id} with game descriptor '{game_descriptor}'")
             # Cache now stores a tuple of (data, raw_responses)
             data, raw_responses = self._cache[cache_key]
             return data, game_descriptor, raw_responses
-
-        logger.info(f"Getting user data for user {user_id} with game descriptor '{game_descriptor}'")
 
         if game_descriptor not in VALID_GAME_DESCRIPTORS:
             logger.warning(f"Game descriptor '{game_descriptor}' not in VALID_GAME_DESCRIPTORS. Attempting to use it anyway.")
@@ -460,11 +431,9 @@ class GameBusClient:
         if not try_all_descriptors:
             # Try each URL until we get data
             for url in urls_to_try:
-                logger.info(f"Trying URL: {url}")
                 # Check if this URL is already in cache
                 url_cache_key = f"{user_id}_{url}"
                 if url_cache_key in self._cache:
-                    logger.info(f"Using cached data for URL: {url}")
                     temp_data, temp_raw_responses = self._cache[url_cache_key]
                 else:
                     temp_data, temp_raw_responses = self._fetch_paginated_data(url, token, page_size)
@@ -472,7 +441,6 @@ class GameBusClient:
                     self._cache[url_cache_key] = (temp_data, temp_raw_responses)
 
                 if temp_data:
-                    logger.info(f"Found data using URL: {url}")
                     # Cache the result for the original cache key
                     self._cache[cache_key] = (temp_data, temp_raw_responses)
                     return temp_data, game_descriptor, temp_raw_responses
@@ -482,43 +450,31 @@ class GameBusClient:
 
         # Use the _fetch_paginated_data method to get the data
         all_user_data, all_raw_responses = self._fetch_paginated_data(data_url, token, page_size)
-
-        logger.info(f"Total data points fetched: {len(all_user_data)}")
-
         # Cache the result
         self._cache[cache_key] = (all_user_data, all_raw_responses)
-
         # If data was found, return it with the original game descriptor
         if all_user_data:
             return all_user_data, game_descriptor, all_raw_responses
 
         # If no data was found and try_all_descriptors is True, try all valid game descriptors
         if try_all_descriptors:
-            logger.info(f"No data found for game descriptor '{game_descriptor}'. Trying all valid game descriptors.")
-
             # Try all valid game descriptors
             descriptors_to_try = [d for d in VALID_GAME_DESCRIPTORS if d != game_descriptor]
-
-            logger.info(f"Will try these descriptors: {descriptors_to_try}")
 
             for descriptor in descriptors_to_try:
                 # Check if this descriptor is already in cache
                 descriptor_cache_key = f"{user_id}_{descriptor}"
                 if descriptor_cache_key in self._cache:
-                    logger.info(f"Using cached data for game descriptor: {descriptor}")
                     descriptor_data, descriptor_raw_responses = self._cache[descriptor_cache_key]
                     if descriptor_data:
-                        logger.info(f"Found {len(descriptor_data)} data points with game descriptor '{descriptor}' (from cache)")
                         # Cache the result for the original cache key
                         self._cache[cache_key] = (descriptor_data, descriptor_raw_responses)
                         return descriptor_data, descriptor, descriptor_raw_responses
 
-                logger.info(f"Trying game descriptor: {descriptor}")
                 try:
                     # Recursive call with the new descriptor, but don't try all descriptors again
                     descriptor_data, actual_descriptor, descriptor_raw_responses = self.get_user_data(token, user_id, descriptor, page_size, try_all_descriptors=False)
                     if descriptor_data:
-                        logger.info(f"Found {len(descriptor_data)} data points with game descriptor '{actual_descriptor}'")
                         # Cache the result for the original cache key
                         self._cache[cache_key] = (descriptor_data, descriptor_raw_responses)
                         return descriptor_data, actual_descriptor, descriptor_raw_responses

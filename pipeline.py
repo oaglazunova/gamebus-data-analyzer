@@ -31,10 +31,6 @@ def parse_args():
 
     args = parser.parse_args()
 
-    # Set up basic logging to see the parsed arguments
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    logger = logging.getLogger(__name__)
-    logger.info(f"Parsed arguments: extract={args.extract}, analyze={args.analyze}, log_level={args.log_level}")
 
     return args
 
@@ -57,10 +53,7 @@ def load_users(users_file: str) -> pd.DataFrame:
 
         # Ensure the required columns are present
         if 'email' in df.columns and 'password' in df.columns:
-            # Include UserID column if it exists, otherwise just use email and password
             columns_to_keep = ['email', 'password']
-            if 'UserID' in df.columns:
-                columns_to_keep.append('UserID')
             logger.info(f"Using columns: {', '.join(columns_to_keep)}")
             return df[columns_to_keep]
         else:
@@ -97,16 +90,16 @@ def run_extraction(user_row: pd.Series) -> Dict[str, List[Dict[str, Any]]]:
         logger.error(f"Failed to get token for user {username}")
         return {}
 
-    logger.info(f"Getting user ID for user: {username}")
+    logger.info(f"Getting player ID for user: {username}")
     user_id_result = client.get_user_id(token)
     if not user_id_result:
-        logger.error(f"Failed to get user ID for user {username}")
+        logger.error(f"Failed to get player ID for user {username}")
         return {}
 
     # Extract the numeric ID and email from the tuple
     user_id, user_email = user_id_result
 
-    logger.info(f"Successfully authenticated user {username} with user ID {user_id}")
+    logger.info(f"Successfully authenticated user {username} with player ID {user_id}")
 
     # Collect data based on requested types
     results = {}
@@ -183,6 +176,7 @@ def main():
     # Set up logging for extraction
     logger = setup_logging(log_level=args.log_level, log_type="extraction")
     logger.info("Starting GameBus Health Behavior Mining Pipeline")
+    logger.info(f"Parsed arguments: extract={args.extract}, analyze={args.analyze}, log_level={args.log_level}")
 
     # Determine which steps to run based on command-line arguments
     # If neither --extract nor --analyze is specified, run both
@@ -208,15 +202,11 @@ def main():
         # Check if data_raw folder exists
         if not os.path.exists(RAW_DATA_DIR):
             logger.warning(f"Data directory {RAW_DATA_DIR} does not exist. Proceeding with analysis using Excel data only.")
-            print(f"Warning: Data directory {RAW_DATA_DIR} does not exist.")
-            print("Proceeding with analysis using Excel data only (config/campaign_*.xlsx).")
         else:
             # Check if data_raw folder contains any data files
             data_files = glob.glob(f'{RAW_DATA_DIR}/*.json')
             if not data_files:
                 logger.warning(f"No JSON data files found in {RAW_DATA_DIR}. Proceeding with analysis using Excel data only.")
-                print(f"Warning: No JSON data files found in {RAW_DATA_DIR}.")
-                print("Proceeding with analysis using Excel data only (config/campaign_*.xlsx).")
 
     # Run extraction if needed
     if should_run_extraction:
@@ -271,7 +261,6 @@ def main():
 
         except KeyboardInterrupt:
             logger.warning("Data extraction interrupted by user. Partial results may have been saved.")
-            print("\nData extraction interrupted by user. Partial results may have been saved.")
             # Continue with analysis if requested, using partial results
             if should_run_analysis:
                 logger.info("Continuing with analysis using partial results...")
@@ -288,5 +277,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\nProgram interrupted by user. Exiting gracefully...")
         logging.getLogger(__name__).warning("Program interrupted by user. Exiting gracefully...")

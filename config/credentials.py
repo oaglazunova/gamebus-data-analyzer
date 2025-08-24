@@ -17,5 +17,8 @@ if not AUTHCODE:
 # BASE_URL = "https://api-new.gamebus.eu/v2"
 BASE_URL = 'https://api.healthyw8.gamebus.eu/v2'
 TOKEN_URL = f"{BASE_URL}/oauth/token"
+# USER_ID_URL returns the current account info; expected JSON includes:
+#   player.id (int): the GameBus Player ID used in all activities endpoints
+#   email (str): the account email
 USER_ID_URL = f"{BASE_URL}/users/current"
 ACTIVITIES_URL = f"{BASE_URL}/players/{{}}/activities?sort=-date"

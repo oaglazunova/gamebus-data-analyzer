@@ -17,20 +17,22 @@ class AllDataCollector:
     """
     Collector for all types of data.
     """
-    def __init__(self, client, token: str, user_id: int, user_email: Optional[str] = None):
+    def __init__(self, client, token: str, user_id: int, user_email: Optional[str] = None, account_user_id: Optional[str] = None):
         """
         Initialize the all data collector.
 
         Args:
             client: GameBusClient instance
             token: User access token
-            user_id: User ID
+            user_id: Player ID (GameBus player.id)
             user_email: User email (optional)
+            account_user_id: External/User ID from the users file (optional)
         """
         self.client = client
         self.token = token
         self.user_id = user_id
         self.user_email = user_email
+        self.account_user_id = account_user_id
 
         # Define the data type configurations
         self.data_configs = {}
@@ -63,10 +65,6 @@ class AllDataCollector:
         # Create directory if it doesn't exist
         os.makedirs(RAW_DATA_DIR, exist_ok=True)
 
-        # Create user ID to email mapping file
-        mapping_file_path = self.create_user_email_mapping()
-        if mapping_file_path:
-            file_paths.append(mapping_file_path)
 
         # Try to collect data for each data type
         for data_type, config in self.data_configs.items():
@@ -87,10 +85,6 @@ class AllDataCollector:
 
                 # Parse the data
                 parsed_data = self.parse_data(raw_data, actual_game_descriptor, property_key)
-
-                if not parsed_data:
-                    logger.warning(f"No {data_type} data parsed for user {self.user_id}")
-                    continue
 
                 # Save the data to a file using the actual game descriptor
                 file_path = self.save_data(parsed_data, actual_game_descriptor.lower())
@@ -114,7 +108,7 @@ class AllDataCollector:
 
         # Save all raw responses to a single file
         if all_raw_responses:
-            all_raw_file_name = f"user_{self.user_id}_all_raw.json"
+            all_raw_file_name = f"player_{self.user_id}_all_raw.json"
             all_raw_file_path = os.path.join(RAW_DATA_DIR, all_raw_file_name)
 
             try:
@@ -135,6 +129,7 @@ class AllDataCollector:
                         json.dump(parsed_responses, json_file, indent=4)
 
                     file_paths.append(all_raw_file_path)
+
 
             except Exception as e:
                 logger.error(f"Failed to save all raw JSON responses to file: {e}")
@@ -281,7 +276,7 @@ class AllDataCollector:
             return ""
 
         # Create file path
-        file_name = f"user_{self.user_id}_{data_type}_raw.json"
+        file_name = f"player_{self.user_id}_{data_type}_raw.json"
         file_path = os.path.join(RAW_DATA_DIR, file_name)
 
         try:
@@ -389,44 +384,7 @@ class AllDataCollector:
             formatted[k] = convert_value(k, v)
         return formatted
 
-    def create_user_email_mapping(self) -> str:
-        """
-        Create a txt file mapping user ID to email.
 
-        Returns:
-            Path to the created txt file or empty string if creation failed
-        """
-        # Don't create file if email is not available
-        if not self.user_email:
-            logger.warning(f"No email available for user {self.user_id}, skipping user-email mapping file creation")
-            return ""
-
-        # Create file path
-        mapping_file_name = f"user_email_mapping.txt"
-        mapping_file_path = os.path.join(RAW_DATA_DIR, mapping_file_name)
-
-        try:
-            # Check if file exists and read existing mappings
-            mappings = {}
-            if os.path.exists(mapping_file_path):
-                with open(mapping_file_path, 'r') as mapping_file:
-                    for line in mapping_file:
-                        if ':' in line:
-                            uid, email = line.strip().split(':', 1)
-                            mappings[uid.strip()] = email.strip()
-
-            # Add or update current user mapping
-            mappings[str(self.user_id)] = self.user_email
-
-            # Write all mappings to file
-            with open(mapping_file_path, 'w') as mapping_file:
-                for uid, email in mappings.items():
-                    mapping_file.write(f"{uid}: {email}\n")
-
-            return mapping_file_path
-        except Exception as e:
-            logger.error(f"Failed to save user ID to email mapping: {e}")
-            return ""
 
     def save_data(self, data: List[Dict[str, Any]], data_type: str) -> str:
         """
@@ -445,7 +403,7 @@ class AllDataCollector:
             return ""
 
         # Create file path
-        json_file_name = f"user_{self.user_id}_{data_type}.json"
+        json_file_name = f"player_{self.user_id}_{data_type}.json"
         json_file_path = os.path.join(RAW_DATA_DIR, json_file_name)
 
         # Fields to exclude from JSON files

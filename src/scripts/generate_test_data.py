@@ -33,7 +33,6 @@ def load_property_schemes() -> Tuple[Dict[str, List[str]], Dict[str, Dict[str, A
         - Dictionary mapping activity schemes to their property schemes
         - Dictionary mapping property names to their details (type, unit, etc.)
     """
-    print("Loading property schemes from config file")
 
     # The property schemes are already imported from the config file
     print(f"Loaded {len(ACTIVITY_TO_PROPERTIES)} activity schemes and {len(PROPERTY_DETAILS)} property schemes")
@@ -419,7 +418,6 @@ def main():
                     users.append(user)
                     user_ids.append(user['id'])
 
-                print(f"Found {len(users)} users in {USERS_FILE_PATH}")
             else:
                 missing_columns = [col for col in required_columns if col not in df.columns]
                 print(f"Missing required columns in {USERS_FILE_PATH}: {missing_columns}")
@@ -432,8 +430,6 @@ def main():
     else:
         print(f"{USERS_FILE_PATH} not found, using default user IDs")
         user_ids = list(range(1, DEFAULT_NUM_USERS + 1))
-
-    print(f"Generating test data for {len(user_ids)} users...")
 
     # Load property schemes from the config file
     activity_to_properties, property_details = load_property_schemes()
@@ -499,63 +495,39 @@ def main():
             # Use property schemes from Excel
             properties = activity_to_properties[game_descriptor]
             game_descriptor_params[game_descriptor] = ", ".join(properties)
-            print(f"Using Excel property schemes for {game_descriptor}: {properties}")
         elif game_descriptor in hardcoded_params:
             # Use hardcoded parameters
             game_descriptor_params[game_descriptor] = hardcoded_params[game_descriptor]
-            print(f"Using hardcoded parameters for {game_descriptor}")
         else:
-            # For game descriptors without defined parameters, use a default set of parameters
-            default_params = "SECRET, DESCRIPTION, DURATION, TIMESTAMP"
-            game_descriptor_params[game_descriptor] = default_params
-            print(f"No parameters found for {game_descriptor}, using default parameters: {default_params}")
-
-    print(f"Defined parameters for {len(game_descriptor_params)} game descriptors")
+            print(f"No parameters found for game descriptor {game_descriptor}, skipping")
 
     # Use campaign user IDs for filenames if available
     filename_user_ids = campaign_user_ids if campaign_user_ids else user_ids
-
-    # Ensure user ID 107 is included for the example geofence data
-    if 107 not in filename_user_ids:
-        filename_user_ids.append(107)
-        print(f"Added user ID 107 for example geofence data")
 
     print(f"Using {len(filename_user_ids)} unique user IDs from campaign_data.xlsx for filenames")
 
     # Generate data for each filename user ID
     for filename_user_id in filename_user_ids:
-        print(f"Generating data for user ID {filename_user_id}...")
-
-        # Dictionary to store all data for this user
         user_data = {}
 
         # Generate data for each game descriptor
         for game_descriptor, params_comment in game_descriptor_params.items():
-            print(f"  Generating data for game descriptor: {game_descriptor}")
-
-            # Generate data for this game descriptor
             data_points = generate_data_for_game_descriptor(game_descriptor, params_comment, property_details)
-
-            # Store the data points
             user_data[game_descriptor.lower()] = data_points
 
             # Save the data points to a separate file
-            file_name = f"user_{filename_user_id}_{game_descriptor.lower()}.json"
+            file_name = f"player_{filename_user_id}_{game_descriptor.lower()}.json"
             file_path = os.path.join(RAW_DATA_DIR, file_name)
 
             with open(file_path, 'w') as json_file:
                 json.dump(data_points, json_file, indent=4)
 
-            print(f"  Saved {len(data_points)} data points to {file_path}")
-
         # Create an all_data file that combines data from all game descriptors
-        all_data_file_name = f"user_{filename_user_id}_all_data.json"
+        all_data_file_name = f"player_{filename_user_id}_all_data.json"
         all_data_file_path = os.path.join(RAW_DATA_DIR, all_data_file_name)
 
         with open(all_data_file_path, 'w') as json_file:
             json.dump(user_data, json_file, indent=4)
-
-        print(f"  Saved combined data for all game descriptors to {all_data_file_path}")
 
     print("Data generation complete!")
 

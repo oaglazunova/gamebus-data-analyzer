@@ -2,6 +2,8 @@
 
 A tool for extracting and analyzing health behavior data from the GameBus platform.
 
+Officially only Windows is supported. 
+
 ## Overview
 
 This project extracts user activity data from the GameBus API and performs various analyses to generate insights about user behavior, activity patterns, and engagement.
@@ -9,7 +11,7 @@ The script can technically run on Linux and Mac, but officially we support only 
 
 ## Quick Start
 
-1. **Install Python 3.8+**:
+1. **Install Python 3.13+**:
 - Download Python from the official site: https://www.python.org/downloads/windows/
 - Run the installer and check “Add Python to PATH”. Then click Install Now.
 - Open PowerShell (press Win → type “PowerShell”).

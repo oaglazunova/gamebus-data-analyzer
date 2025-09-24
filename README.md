@@ -2,15 +2,12 @@
 
 A tool for extracting and analyzing health behavior data from the GameBus platform.
 
+Officially only Windows is supported. 
+
 ## Overview
 
 This project extracts user activity data from the GameBus API and performs various analyses to generate insights about user behavior, activity patterns, and engagement.
-
-## Key Features
-
-- **Data Extraction**: Retrieves data from GameBus API
-- **Parallel Processing**: Processes multiple users concurrently for improved performance
-- **Analysis**: Generates statistics and visualizations for activity patterns, user engagement, etc.
+The script can technically run on Linux and Mac, but officially we support only Windows.
 
 ## Quick Start
 
@@ -36,7 +33,7 @@ This project extracts user activity data from the GameBus API and performs vario
    python pipeline.py --log-level DEBUG  # Verbose logging
    ```
 
-## Running on Windows
+## Detailed Start Guide
 
 Follow these steps if you're new to running Python projects on Windows. Use Windows PowerShell for the commands below.
 
@@ -159,11 +156,46 @@ gamebus-data-analyzer/
 
 ## Available Analyses
 
-The tool provides various analyses including:
-- Activity patterns and distributions
-- User engagement metrics
-- Movement types and physical activity statistics
-- Tasks completion rates
+Running `python -m src.analysis.data_analysis` or `python pipeline.py --analyze` saves all outputs **directly under `data_analysis/`** (no `visualizations/` or `statistics/` subfolders). Descriptive statistics are printed to the console during the run.
+
+**Activities (from `config/campaign_data.xlsx`, sheet `activities`)**
+- Activity type distribution → `activity_types_distribution.png`
+- Activities over time (daily) → `activities_over_time.png`
+- Points by activity type (total) → `points_by_activity_type.png`
+- Points by player → `points_by_player.png`
+- Average rewarded points by activity type → `rewards_by_activity_type.png`
+- Points over time (daily) → `points_over_time.png`
+- Player activity counts (top 50 if many) → `player_activity_distribution.png`
+- Activity type × player (heatmap) → `activity_type_by_player.png`
+- Usage heatmap (weekday × hour) → `activity_heatmap_by_time.png`
+- Activity types stacked by date → `activity_types_stacked_by_date.png`
+- Player engagement heatmap (by day) → `player_engagement_heatmap.png`
+- Activities by day of week → `usage_by_day_of_week.png`
+
+**Campaign metrics & participation**
+- Active vs Passive players (by rewarded tasks) → `player_active_vs_passive_pie.png`
+
+- **Drop-out & joining**
+- Drop-out histogram (first → last activity, days) → `dropout_rates_distribution.png`
+- Joining histogram (campaign start → first activity, days) → `joining_rates_distribution.png`
+- Combined KDE (drop-out vs joining) → `combined_dropout_joining_rates.png`
+- Combined boxplots (drop-out vs joining) → `combined_dropout_joining_boxplots.png`
+
+**Challenges / Tasks (from `config/campaign_desc.xlsx`: sheets `visualizations`, `challenges`, `tasks`)**
+- Activity completion by type → `activity_completion.png`
+- Activity type by hour → `activity_type_by_hour.png`
+- Activity type by weekday → `activity_type_by_day.png`
+- Active players per day → `active_players_per_day.png`
+- Tasks by provider (mapped via `desc_tasks.dataproviders`, zero bars if none found) → `tasks_by_provider.png`
+- Tasks completed per day → `tasks_completed_per_day.png`
+- Tasks completed per player → `tasks_completed_per_player.png`
+
+**Geofence & steps (from JSON in `data_raw/`)**
+- Geofence hourly activity → `geofence_hourly_activity.png`
+- Geofence speed by hour → `geofence_speed_by_hour.png`
+- Movement trajectory (2D) → `geofence_movement_trajectory.png`
+- Geofence 3D visualization → `geofence_3d_visualization.png`
+- Steps trend (DAY_AGGREGATE) → `steps_trend.png`
 
 See the documentation in `src/analysis/data_analysis.py` for details on specific analyses.
 
@@ -188,12 +220,11 @@ See the documentation in `src/analysis/data_analysis.py` for details on specific
 ### API Key
 
 The GameBus API key must be stored in a `.env` file in the root directory:
+For the API key, contact GameBus team. 
 
 ```
 GAMEBUS_API_KEY=your_api_key_here
 ```
-
-Note: This is the Basic auth code (client credentials) provided for your GameBus client, not your user password. Contact your GameBus administrator if you don't have it.
 
 ### User Credentials
 
@@ -251,7 +282,7 @@ Configuration files are tracked by Git, but sensitive content (XLSX files with c
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the CC-BY-4.0 License.
 
 ## Visualization color palettes and accessibility
 

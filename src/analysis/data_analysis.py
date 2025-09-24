@@ -1268,6 +1268,27 @@ Optional[Tuple]:
 
                 if activities_by_day.empty or activities_by_day.sum() <= 0:
                     logger.warning("No activities data by day of week for visualization")
+
+                else:
+                    def plot_usage_by_day_of_week():
+                        # bar positions
+                        x = range(len(day_order))
+                        # ensure consistent order and lengths
+                        counts = [int(activities_by_day.get(day, 0)) for day in day_order]
+                        plt.bar(x, counts, color=SINGLE_SERIES_COLOR)
+                        plt.title('Usage by Day of Week')
+                        plt.xlabel('Day of Week')
+                        plt.ylabel('Number of Activities')
+                        plt.xticks(x, day_order, rotation=45, ha='right')
+                        # small bottom margin for labels
+                        plt.margins(x=0.01)
+
+                    create_and_save_figure(
+                        plot_usage_by_day_of_week,
+                        f'{OUTPUT_VISUALIZATIONS_DIR}/usage_by_day_of_week.png',
+                        figsize=(10, 6)
+                    )
+
             except Exception as e:
                 logger.error(f"Error processing data for day of week visualization: {e}")
     except Exception as e:

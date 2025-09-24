@@ -54,34 +54,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 from config.paths import PROJECT_ROOT
 
 # Set up logging
-# Create logs directory if it doesn't exist
-logs_dir = os.path.join(PROJECT_ROOT, "logs")
-os.makedirs(logs_dir, exist_ok=True)
-
-# Configure logger for data analysis only
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-# Clear any existing handlers to avoid duplicate logs
-if logger.hasHandlers():
-    logger.handlers.clear()
-
-# Create formatter
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-# Add console handler (only warnings and above to console)
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.WARNING)
-console_handler.setFormatter(formatter)
-logger.addHandler(console_handler)
-
-# Add file handler for analysis logs
-file_handler = logging.FileHandler(os.path.join(logs_dir, 'data_analysis.log'))
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-
-# Prevent propagation to root logger to avoid duplicate logs
-logger.propagate = False
 
 # Set style for plots
 plt.style.use('ggplot')
@@ -271,7 +244,17 @@ def _load_excel_sheets(path: str, prefix: str = "") -> Dict[str, pd.DataFrame]:
 
 def load_excel_files() -> Dict[str, pd.DataFrame]:
     """
-    Load campaign data from Excel files in the config directory.
+    Load campaign data from the config directory.
+
+    Supports two sources for campaign data:
+    - config/campaign_data.xlsx (multi-sheet Excel)
+    - config/campaign_data/*.csv (one CSV file per sheet)
+
+    And two sources for campaign descriptions:
+    - config/campaign_desc.xlsx (multi-sheet Excel)
+    - config/campaign_desc/*.csv (one CSV file per sheet)
+
+    When both Excel and CSV are present for the same sheet, CSV overrides the Excel sheet.
 
     Returns:
         Dict[str, pd.DataFrame]: Dictionary of DataFrames, keyed by sheet name
@@ -280,11 +263,64 @@ def load_excel_files() -> Dict[str, pd.DataFrame]:
     ensure_dir(CONFIG_DIR)
 
     data_dict: Dict[str, pd.DataFrame] = {}
+
+    # 1) Load campaign_data.xlsx if present (no prefix)
     data_dict.update(_load_excel_sheets(os.path.join(CONFIG_DIR, 'campaign_data.xlsx')))
+
+    # 2) Additionally, load CSV files from config/campaign_data directory (if present)
+    data_dir = os.path.join(CONFIG_DIR, 'campaign_data')
+    if os.path.isdir(data_dir):
+        csv_files = [f for f in os.listdir(data_dir) if f.lower().endswith('.csv')]
+        if not csv_files:
+            logger.warning(f"Directory exists but contains no CSV files: {data_dir}")
+        for fname in csv_files:
+            fpath = os.path.join(data_dir, fname)
+            key_name = os.path.splitext(fname)[0]
+            try:
+                df = pd.read_csv(fpath)
+                if df.empty:
+                    logger.warning(f"CSV '{fname}' in {data_dir} is empty, skipping")
+                    continue
+                # CSV overrides Excel when key collides
+                if key_name in data_dict:
+                    logger.info(f"Overriding '{key_name}' from Excel with CSV file: {fname}")
+                data_dict[key_name] = df
+                logger.info(f"Loaded CSV '{fname}' from {data_dir} with {len(df)} rows and {len(df.columns)} columns")
+            except Exception as e:
+                logger.error(f"Error loading CSV '{fname}' from {data_dir}: {e}")
+    else:
+        logger.info(f"Campaign data CSV directory not found (optional): {data_dir}")
+
+    # 3) Load campaign_desc.xlsx sheets with desc_ prefix (if present)
     data_dict.update(_load_excel_sheets(os.path.join(CONFIG_DIR, 'campaign_desc.xlsx'), prefix="desc_"))
 
+    # 4) Additionally, load CSV files from config/campaign_desc directory (if present)
+    desc_dir = os.path.join(CONFIG_DIR, 'campaign_desc')
+    if os.path.isdir(desc_dir):
+        csv_files = [f for f in os.listdir(desc_dir) if f.lower().endswith('.csv')]
+        if not csv_files:
+            logger.warning(f"Directory exists but contains no CSV files: {desc_dir}")
+        for fname in csv_files:
+            fpath = os.path.join(desc_dir, fname)
+            key_name = os.path.splitext(fname)[0]
+            prefixed_key = f"desc_{key_name}"
+            try:
+                df = pd.read_csv(fpath)
+                if df.empty:
+                    logger.warning(f"CSV '{fname}' in {desc_dir} is empty, skipping")
+                    continue
+                # CSV overrides Excel when key collides
+                if prefixed_key in data_dict:
+                    logger.info(f"Overriding '{prefixed_key}' from Excel with CSV file: {fname}")
+                data_dict[prefixed_key] = df
+                logger.info(f"Loaded CSV '{fname}' from {desc_dir} with {len(df)} rows and {len(df.columns)} columns")
+            except Exception as e:
+                logger.error(f"Error loading CSV '{fname}' from {desc_dir}: {e}")
+    else:
+        logger.info(f"Campaign description CSV directory not found (optional): {desc_dir}")
+
     if not data_dict:
-        logger.warning("No data loaded from Excel files")
+        logger.warning("No data loaded from config files (Excel/CSV)")
 
     return data_dict
 

@@ -100,8 +100,7 @@ class AllDataCollector:
 
                     if file_path:
                         file_paths.append(file_path)
-                else:
-                    logger.warning(f"No {data_type} data collected for user {self.user_id}")
+
             except Exception as e:
                 logger.error(f"Failed to collect {data_type} data for user {self.user_id}: {e}")
                 logger.exception(e)  # Log the full exception traceback
@@ -251,8 +250,19 @@ class AllDataCollector:
 
             for property_instance in data_point.get("propertyInstances", []):
                 prop_key = property_instance.get("property", {}).get("translationKey")
+                if not prop_key:
+                    continue
                 property_value = property_instance.get("value")
-                data[prop_key] = property_value
+                # If the same property key appears multiple times (e.g., multiple survey answers),
+                # collect all values into a list instead of overwriting earlier ones.
+                if prop_key in data and not prop_key.startswith("X_"):
+                    existing = data[prop_key]
+                    if isinstance(existing, list):
+                        existing.append(property_value)
+                    else:
+                        data[prop_key] = [existing, property_value]
+                else:
+                    data[prop_key] = property_value
 
             if data:
                 data_list.append(data)
@@ -421,6 +431,7 @@ class AllDataCollector:
         try:
             with open(json_file_path, 'w') as json_file:
                 json.dump(filtered_data, json_file, indent=4)
+                logger.info(f"Saved {len(filtered_data)} data points for {data_type} to {json_file_path}")
 
             return json_file_path
         except Exception as e:

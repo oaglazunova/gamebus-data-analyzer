@@ -14,7 +14,7 @@ This project extracts user activity data from the GameBus API and performs vario
 
 ## Quick Start
 
-1. **Install Python 3.8+** and clone this repository
+1. **Install Python 3.9+** and clone this repository
 2. **Set up environment**: 
    ```
    python -m venv .venv
@@ -24,7 +24,9 @@ This project extracts user activity data from the GameBus API and performs vario
 3. **Configure**:
    - Create `.env` file with `GAMEBUS_API_KEY=your_api_key_here`
    - Add user credentials to `config/users.xlsx` (see Configuration section below for format)
-   - For analysis, add campaign files to `config/campaign_desc.xlsx` and `config/campaign_data.xlsx`
+   - For analysis, add campaign files as Excel or CSVs: campaign data via `config/campaign_data.xlsx` or CSVs under `config/campaign_data/`, and campaign descriptions via `config/campaign_desc.xlsx` or CSVs under `config/campaign_desc/` (one CSV per sheet).
+![img.png](img.png)
+![img_1.png](img_1.png)
 
 4. **Run**:
    ```
@@ -33,6 +35,104 @@ This project extracts user activity data from the GameBus API and performs vario
    python pipeline.py --analyze          # Only analyze existing data
    python pipeline.py --log-level DEBUG  # Verbose logging
    ```
+
+## Running on Windows
+
+Follow these steps if you're new to running Python projects on Windows. Use Windows PowerShell for the commands below.
+
+1) Install Python 3.9+ and add it to PATH
+- Download Python from https://www.python.org/downloads/windows/
+- During installation, check “Add python.exe to PATH”.
+- Verify installation:
+  ```
+  python --version   # or: py --version
+  ```
+
+2) Get the project code
+- Option A (recommended): Install Git for Windows (https://git-scm.com/download/win) and run:
+  ```
+  git clone https://github.com/<your-org>/gamebus-data-analyzer.git
+  ```
+- Option B: Click “Code” → “Download ZIP” on GitHub, then unzip to a folder, e.g. `C:\Users\You\Documents\gamebus-data-analyzer`.
+
+3) Open PowerShell in the project folder
+- In File Explorer, right‑click the project folder → “Open in Terminal”, or:
+  ```
+  cd C:\Users\You\Documents\gamebus-data-analyzer
+  ```
+
+4) Create and activate a virtual environment
+- Create venv (either command works):
+  ```
+  python -m venv .venv
+  # or
+  py -3 -m venv .venv
+  ```
+- Activate it (PowerShell):
+  ```
+  .\.venv\Scripts\Activate.ps1
+  ```
+- If you get “running scripts is disabled on this system”, temporarily allow it for this session:
+  ```
+  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+  .\.venv\Scripts\Activate.ps1
+  ```
+- You should see `(.venv)` at the start of your prompt. To deactivate later, run `deactivate`.
+
+5) Install dependencies
+```
+python -m pip install -r requirements.txt
+```
+If `pip` is not recognized, always prefer `python -m pip ...` on Windows.
+
+6) Add your GameBus API key (.env)
+- Create a file named `.env` in the project root (same folder as `pipeline.py`).
+- Put your client credentials key on a single line:
+  ```
+  GAMEBUS_API_KEY=your_api_key_here
+  ```
+
+7) Add users.xlsx
+- Copy your list of users and passwords to `config\` and rename to `users.xlsx`.
+- Verify that it has headers `email` and `password` (lowercase). Example row:
+  ```
+  email              | password
+  user@example.com   | secret123
+
+8) (Optional, only for analysis) Add campaign Excel/CSV files
+- Provide campaign description as either:
+  - `config\campaign_desc.xlsx` (multi‑sheet), or
+  - CSV files under `config\campaign_desc\` (one CSV per sheet; CSV overrides same‑named sheets in the Excel file).
+  
+- Provide campaign data as either:
+  - `config\campaign_data.xlsx` (multi‑sheet), or
+  - CSV files under `config\campaign_data\` (one CSV per sheet; CSV overrides same‑named sheets in the Excel file).
+
+9) Run the pipeline
+- Full run (extract + analyze):
+  ```
+  python pipeline.py
+  ```
+- Only extract or only analyze:
+  ```
+  python pipeline.py --extract
+  python pipeline.py --analyze
+  ```
+- More logs:
+  ```
+  python pipeline.py --log-level DEBUG
+  ```
+
+10) Where results appear
+- Raw JSON: `data_raw\`
+- Analysis outputs: `data_analysis\`
+- Logs: `logs\data_extraction.log` and `logs\data_analysis.log`
+
+Troubleshooting on Windows
+- “python is not recognized”: try `py` instead (e.g., `py -3 -m venv .venv`, `py pipeline.py`).
+- “Permission denied” activating venv: run the `Set-ExecutionPolicy` command shown above and activate again.
+- Pip SSL or proxy issues: try `python -m pip install --upgrade pip` or configure your corporate proxy per IT guidelines.
+- If Excel files are open, some operations may fail—close them and retry.
 
 ## Project Structure
 
@@ -49,6 +149,13 @@ gamebus-data-analyzer/
 ├── logs/                  # Log files
 └── pipeline.py            # Main pipeline runner
 ```
+
+## Outputs and Logs
+
+- Raw API data is saved under `data_raw/` as JSON files (e.g., `player_<id>_<descriptor>.json`) and a combined `player_<id>_all_raw.json` per user.
+- Analysis results are saved under `data_analysis/` (e.g., `analysis_report.txt` and generated figures).
+- Logs are written to `logs/data_extraction.log` (extraction) and `logs/data_analysis.log` (analysis).
+- Tip: use `--log-level DEBUG` for more verbose output when running `pipeline.py`.
 
 ## Available Analyses
 
@@ -69,8 +176,14 @@ See the documentation in `src/analysis/data_analysis.py` for details on specific
 - `paths.py`: File paths used throughout the project
 - `settings.py`: General settings including valid game descriptors and API parameters
 - `users.xlsx`: User credentials for GameBus API access (you must create this)
-- `campaign_desc.xlsx`: Campaign description data (required for analysis)
-- `campaign_data.xlsx`: Campaign activity data (required for analysis)
+- `campaign_data.xlsx`: Campaign activity data (required for analysis), provided as either:
+  - `campaign_data.xlsx` (single Excel file with multiple sheets), or
+  - CSV files under `config/campaign_data/` (one CSV per sheet; filenames become sheet names).
+  - If both are present, CSV files override matching sheets from `campaign_data.xlsx`.
+- Campaign description data (required for analysis), provided as either:
+  - `campaign_desc.xlsx` (single Excel file with multiple sheets), or
+  - CSV files under `config/campaign_desc/` (one CSV per sheet; filenames become sheet names).
+  - If both are present, CSV files override matching sheets from `campaign_desc.xlsx`.
 
 ### API Key
 
@@ -79,6 +192,8 @@ The GameBus API key must be stored in a `.env` file in the root directory:
 ```
 GAMEBUS_API_KEY=your_api_key_here
 ```
+
+Note: This is the Basic auth code (client credentials) provided for your GameBus client, not your user password. Contact your GameBus administrator if you don't have it.
 
 ### User Credentials
 
@@ -92,14 +207,17 @@ user@example.com     | password123  | 12345
 
 Requirements:
 - Must include header row with exact column names: `email` and `password` (lowercase)
-- The `UserID` column is optional
-- !: You can use the Excel file with users generated for GameBus campaigns without any modifications
+- Note: You can use the Excel file with users generated for GameBus campaigns without any modifications
 
 ### Campaign Data
 
 For analysis functionality, copy these files from the GameBus Campaigns website:
-- `campaign_desc.xlsx`: Contains challenge descriptions and levels
-- `campaign_data.xlsx`: Contains activity data for all users
+- Campaign data provided as either:
+  - `campaign_data.xlsx` (contains activity data for all users), or
+  - CSV files under `config/campaign_data/` (split per sheet).
+- Campaign descriptions provided as either:
+  - `campaign_desc.xlsx` (contains challenge descriptions and levels), or
+  - CSV files under `config/campaign_desc/` (split per sheet).
 
 ### Game Descriptors
 

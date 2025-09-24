@@ -9,16 +9,16 @@ import sys
 import pandas as pd
 import pprint
 
+# Project root
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 # Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+sys.path.insert(0, PROJECT_ROOT)
 
 # Path to the Excel file with property schemes
-EXCEL_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
-                              'api docs', 'HW8-database-bootstrap.xlsx')
+EXCEL_FILE_PATH = os.path.join(PROJECT_ROOT, 'api docs', 'HW8-database-bootstrap.xlsx')
 
 # Path to the config file
-CONFIG_FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                               'config', 'property_schemes.py')
+CONFIG_FILE_PATH = os.path.join(PROJECT_ROOT, 'config', 'property_schemes.py')
 
 def extract_property_schemes_from_excel():
     """

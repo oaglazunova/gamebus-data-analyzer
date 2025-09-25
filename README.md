@@ -11,7 +11,7 @@ The script can technically run on Linux and Mac, but officially we support only 
 
 ## Quick Start
 
-1. **Install Python 3.9+** and clone this repository
+1. **Install Python** and clone this repository
 2. **Set up environment**: 
    ```
    python -m venv .venv
@@ -37,22 +37,22 @@ The script can technically run on Linux and Mac, but officially we support only 
 
 Follow these steps if you're new to running Python projects on Windows. Use Windows PowerShell for the commands below.
 
-1) Install Python 3.9+ and add it to PATH
-- Download Python from https://www.python.org/downloads/windows/
+1) Install Python and add it to PATH
+- Download Python from `https://www.python.org/downloads/` 
 - During installation, check “Add python.exe to PATH”.
-- Verify installation:
+- Verify installation by typing in Windows PowerShell:
   ```
   python --version   # or: py --version
   ```
 
 2) Get the project code
-- Option A (recommended): Install Git for Windows (https://git-scm.com/download/win) and run:
+- Option A (recommended): Install Git for Windows (`https://git-scm.com/download/win`) and run in Windows PowerShell or in Git Bash:
   ```
-  git clone https://github.com/<your-org>/gamebus-data-analyzer.git
+  git clone https://github.com/oaglazunova/gamebus-data-analyzer.git
   ```
 - Option B: Click “Code” → “Download ZIP” on GitHub, then unzip to a folder, e.g. `C:\Users\You\Documents\gamebus-data-analyzer`.
 
-3) Open PowerShell in the project folder
+3) Open PowerShell (or Git Bash) in the project folder
 - In File Explorer, right‑click the project folder → “Open in Terminal”, or:
   ```
   cd C:\Users\You\Documents\gamebus-data-analyzer

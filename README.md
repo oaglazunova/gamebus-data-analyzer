@@ -82,7 +82,7 @@ python -m pip install -r requirements.txt
 ```
 If `pip` is not recognized, always prefer `python -m pip ...` on Windows.
 
-6) Add your GameBus API key (.env)
+6) Add your GameBus API key (.env). For security reasons, the API key will be sent by the GameBus team via Keybase (a secure messenger).
 - Create a file named `.env` in the project root (same folder as `pipeline.py`).
 - Put your client credentials key on a single line:
   ```
@@ -220,7 +220,7 @@ See the documentation in `src/analysis/data_analysis.py` for details on specific
 ### API Key
 
 The GameBus API key must be stored in a `.env` file in the root directory:
-For the API key, contact GameBus team. 
+For the API key, contact GameBus team.
 
 ```
 GAMEBUS_API_KEY=your_api_key_here

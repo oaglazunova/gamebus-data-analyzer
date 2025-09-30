@@ -4,7 +4,6 @@ Logging utilities for the GameBus-HealthBehaviorMining project.
 import logging
 import os
 import sys
-from datetime import datetime
 
 from config.settings import LOG_LEVEL, LOG_FORMAT
 from config.paths import PROJECT_ROOT

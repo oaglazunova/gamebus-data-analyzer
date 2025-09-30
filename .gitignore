@@ -18,6 +18,7 @@ api docs/
 /config/*.yml
 /config/*.ini
 /config/*.env
+/config/*.zip
 
 # Python specific
 __pycache__/

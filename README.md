@@ -2,8 +2,6 @@
 
 A tool for extracting and analyzing health behavior data from the GameBus platform.
 
-Officially only Windows is supported. 
-
 ## Overview
 
 This project extracts user activity data from the GameBus API and performs various analyses to generate insights about user behavior, activity patterns, and engagement.
@@ -20,8 +18,8 @@ The script can technically run on Linux and Mac, but officially we support only 
    ```
 3. **Configure**:
    - Create `.env` file with `GAMEBUS_API_KEY=your_api_key_here`
-   - Add user credentials to `config/users.xlsx` (see Configuration section below for format). You don't need user credentials if you intend to analyze only the data downloaded from GameBus campaigns website. User credentials are need to extract (and subsequently analyze) user data from GameBus database.
-   - For analysis, add campaign files as Excel or CSVs: campaign data via `config/campaign_data.xlsx` or CSVs under `config/campaign_data/`, and campaign descriptions via `config/campaign_desc.xlsx` or CSVs under `config/campaign_desc/` (one CSV per sheet). If you intend only to extract user data from the database, you don't need these files, only user credentials.
+   - For user data extraction, add user credentials to `config/users.xlsx` (see Configuration section below for format). You don't need user credentials if you intend to analyze only the data downloaded from GameBus campaigns website. 
+   - For analysis, add campaign files: campaign data as `config/campaign_data.zip`, and campaign description as `config/campaign_desc.xlsx`. If you intend only to extract user data from the database, you don't need these files, only user credentials.
 ![img.png](img.png)
 ![img_1.png](img_1.png)
 
@@ -96,14 +94,9 @@ If `pip` is not recognized, always prefer `python -m pip ...` on Windows.
   email              | password
   user@example.com   | secret123
 
-8) (Optional, only for analysis) Add campaign Excel/CSV files
-- Provide campaign description as either:
-  - `config\campaign_desc.xlsx` (multi‑sheet), or
-  - CSV files under `config\campaign_desc\` (one CSV per sheet; CSV overrides same‑named sheets in the Excel file).
-  
-- Provide campaign data as either:
-  - `config\campaign_data.xlsx` (multi‑sheet), or
-  - CSV files under `config\campaign_data\` (one CSV per sheet; CSV overrides same‑named sheets in the Excel file).
+8) (Optional, only for analysis) Add campaign files
+- Provide campaign description as `config\campaign_desc.xlsx`  
+- Provide campaign data as `config\campaign_data.zip`
 
 9) Run the pipeline
 - Full run (extract + analyze):

@@ -38,9 +38,9 @@ def setup_logging(log_to_file: bool = True, log_level: str = None, log_type: str
     if logger.hasHandlers():
         logger.handlers.clear()
 
-    # Create console handler (respect chosen log level)
+    # Create console handler (limit console to warnings and above)
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(numeric_level)
+    console_handler.setLevel(logging.WARNING)
 
     # Create formatter
     formatter = logging.Formatter(LOG_FORMAT)
@@ -48,15 +48,6 @@ def setup_logging(log_to_file: bool = True, log_level: str = None, log_type: str
 
     # Add console handler to logger
     logger.addHandler(console_handler)
-
-    # Also configure root logger to ensure module loggers print to console
-    root_logger = logging.getLogger()
-    root_logger.setLevel(numeric_level)
-    if not any(isinstance(h, logging.StreamHandler) for h in root_logger.handlers):
-        root_console_handler = logging.StreamHandler(sys.stdout)
-        root_console_handler.setLevel(numeric_level)
-        root_console_handler.setFormatter(formatter)
-        root_logger.addHandler(root_console_handler)
 
     # Add file handler if requested
     if log_to_file:

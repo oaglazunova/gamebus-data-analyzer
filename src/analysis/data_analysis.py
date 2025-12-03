@@ -98,6 +98,10 @@ BOX_COLORMAP = 'Set2'  # Categorical colormap for categorical comparisons
 REGRESSION_COLORMAP = 'Blues'  # Sequential colormap for showing relationships
 SINGLE_SERIES_COLOR = sns.color_palette("colorblind", 10)[0]
 
+# Max characters for any textual label on charts (tick labels, legend entries, axes titles)
+LABEL_MAX_CHARS = 30
+ELLIPSIS = '...'
+
 
 def get_independent_colormap(n_colors: int):
     """
@@ -178,6 +182,134 @@ def ensure_output_dirs() -> None:
     ensure_dir(OUTPUT_VISUALIZATIONS_DIR)
 
 
+def safe_filename(text: Optional[str], max_len: int = 120) -> str:
+    """Return a filesystem-safe filename fragment derived from text.
+
+    - Replaces spaces with underscores
+    - Removes characters not in [A-Za-z0-9._-]
+    - Truncates to max_len
+    """
+    if not text:
+        return "unknown"
+    try:
+        s = str(text)
+    except Exception:
+        s = "unknown"
+    s = s.replace(" ", "_")
+    s = re.sub(r"[^A-Za-z0-9._-]", "", s)
+    if not s:
+        s = "unknown"
+    return s[:max_len]
+
+
+def compute_barh_fig_height(n_bars: int, row_height: float = 0.35, min_height: float = 4.0,
+                            max_height: float = 30.0) -> float:
+    """Compute a reasonable figure height for horizontal bar charts based on number of bars."""
+    try:
+        n = int(n_bars)
+    except Exception:
+        n = 10
+    h = n * row_height + 2.0  # add some padding for titles/labels
+    h = max(min_height, min(max_height, h))
+    return h
+
+
+def _truncate_text(text: Optional[str], max_chars: int = LABEL_MAX_CHARS) -> str:
+    """Return text truncated to max_chars, appending ELLIPSIS if needed.
+
+    Args:
+        text: Input text (None-safe)
+        max_chars: Maximum number of characters allowed (including ellipsis if applied)
+
+    Returns:
+        Truncated string (or empty string if input is falsy)
+    """
+    if not text:
+        return ""
+    try:
+        s = str(text)
+    except Exception:
+        return ""
+    if len(s) <= max_chars:
+        return s
+    # Ensure the ellipsis is included within the limit
+    cut = max(0, max_chars - len(ELLIPSIS))
+    return (s[:cut] + ELLIPSIS) if cut > 0 else ELLIPSIS
+
+
+def _apply_label_truncation(fig, max_chars: int = LABEL_MAX_CHARS) -> None:
+    """Truncate long texts on all axes in the figure.
+
+    Applies to:
+    - X/Y tick labels
+    - Legend texts
+    """
+    try:
+        # Ensure tick labels are realized from formatters before reading them
+        try:
+            fig.canvas.draw()
+        except Exception:
+            pass
+
+        for ax in fig.get_axes():
+            # Helper to safely truncate and set tick labels while preserving rotation/alignment
+            def _truncate_axis_labels(axis: str):
+                try:
+                    if axis == 'x':
+                        ticks = ax.get_xticks()
+                        texts = ax.get_xticklabels()
+                        formatter = ax.get_xaxis().get_major_formatter()
+                        set_labels = ax.set_xticklabels
+                    else:
+                        ticks = ax.get_yticks()
+                        texts = ax.get_yticklabels()
+                        formatter = ax.get_yaxis().get_major_formatter()
+                        set_labels = ax.set_yticklabels
+
+                    # Preserve current rotation and alignment from existing labels if available
+                    rot = texts[0].get_rotation() if texts else 0
+                    ha = texts[0].get_ha() if texts else 'center'
+
+                    # Prefer existing text; if empty (formatter-based), compute via formatter
+                    label_strings = [t.get_text() for t in texts]
+                    if not any(label_strings) and len(ticks) == len(texts):
+                        try:
+                            # Most formatters are callable
+                            label_strings = [str(formatter(t)) for t in ticks]
+                        except Exception:
+                            label_strings = [t.get_text() for t in texts]
+
+                    # Truncate and re-apply as fixed labels matching current ticks
+                    truncated = [_truncate_text(s, max_chars) if isinstance(s, str) else '' for s in label_strings]
+                    set_labels(truncated)
+
+                    # Re-apply rotation/alignment
+                    new_texts = ax.get_xticklabels() if axis == 'x' else ax.get_yticklabels()
+                    for nt in new_texts:
+                        nt.set_rotation(rot)
+                        nt.set_ha(ha)
+                except Exception:
+                    pass
+
+            # Apply to both axes
+            _truncate_axis_labels('x')
+            _truncate_axis_labels('y')
+
+            # Legend entries
+            leg = ax.get_legend()
+            if leg is not None:
+                for txt in leg.get_texts():
+                    try:
+                        t = txt.get_text()
+                        if t:
+                            txt.set_text(_truncate_text(t, max_chars))
+                    except Exception:
+                        pass
+    except Exception:
+        # Never fail plotting because of label truncation
+        pass
+
+
 def create_and_save_figure(
         plot_function: Callable[[], None],
         filename: str,
@@ -201,6 +333,8 @@ def create_and_save_figure(
 
     plt.figure(figsize=figsize)
     plot_function()
+    # After the plot is created, truncate any overly long labels
+    _apply_label_truncation(plt.gcf(), LABEL_MAX_CHARS)
     plt.tight_layout()
     plt.savefig(filename, bbox_inches='tight')
     plt.close()  # Close the figure to free memory
@@ -927,6 +1061,222 @@ Optional[Tuple]:
         logger.error(f"Error creating points over time visualization: {e}")
     # Continue with other visualizations even if this one fails
 
+    # 3.4 Reward-level analysis by Challenge and by Rule (from rewardedParticipations)
+    try:
+        # Build a reward-level table by exploding detailed_rewards
+        if 'detailed_rewards' not in activities.columns:
+            activities['detailed_rewards'] = activities['rewardedParticipations'].apply(extract_detailed_rewards)
+
+        rewards_df = activities[['pid', 'date', 'type', 'detailed_rewards']].copy()
+        rewards_df = rewards_df.explode('detailed_rewards')
+        if rewards_df['detailed_rewards'].isna().all():
+            logger.warning("No detailed rewards to analyze by challenge/rule")
+        else:
+            rewards_df = rewards_df[rewards_df['detailed_rewards'].notna()]
+
+            # Safe extractors
+            def _extract_reward_points(r):
+                try:
+                    return int(r.get('points', 0)) if isinstance(r, dict) else 0
+                except Exception:
+                    return 0
+
+            def _extract_challenge(r):
+                """
+                Returns (challenge_name, challenge_id)
+                Note: some datasets may use 'xid' as list or scalar; normalize to string.
+                """
+                name, cid = None, None
+                if isinstance(r, dict):
+                    ch = r.get('challenge')
+                    if isinstance(ch, dict):
+                        name = ch.get('name') or ch.get('label')
+                        cid = ch.get('xid') or ch.get('id')
+                    # Fallbacks if challenge is not nested
+                    if name is None:
+                        for key in ('challengeName', 'name', 'label'):
+                            if key in r and pd.notna(r.get(key)):
+                                name = r.get(key)
+                                break
+                    if cid is None:
+                        for key in ('challengeId', 'challenge_id', 'cid', 'id', 'xid'):
+                            if key in r and pd.notna(r.get(key)):
+                                cid = r.get(key)
+                                break
+                # Normalize potential list ids
+                if isinstance(cid, list) and cid:
+                    cid = cid[0]
+                return name, cid
+
+            def _extract_rule(r):
+                if isinstance(r, dict):
+                    val = r.get('rule')
+                    if isinstance(val, (str, int, float)):
+                        return str(val)
+                return None
+
+            rewards_df['reward_points'] = rewards_df['detailed_rewards'].apply(_extract_reward_points)
+            rewards_df[['challenge_name', 'challenge_id']] = rewards_df['detailed_rewards'].apply(
+                lambda r: pd.Series(_extract_challenge(r))
+            )
+            rewards_df['rule_name'] = rewards_df['detailed_rewards'].apply(_extract_rule)
+
+            # Replace empties with friendly labels for grouping
+            rewards_df['challenge_name'] = rewards_df['challenge_name'].fillna('Unknown')
+            rewards_df['rule_name'] = rewards_df['rule_name'].fillna('Unknown')
+
+            # Challenge: count of rewards per challenge (Top 30)
+            challenge_counts = rewards_df['challenge_name'].value_counts().head(30)
+            if challenge_counts.empty:
+                logger.warning("No data for challenge-based counts")
+            else:
+                def plot_rewards_by_challenge_count():
+                    ax = challenge_counts.plot(kind='bar', colormap=BAR_COLORMAP)
+                    plt.title('Count of Rewarded Activities by Challenge (Top 30)')
+                    plt.xlabel('Challenge Name')
+                    plt.ylabel('Count of Rewards')
+                    plt.xticks(rotation=45, ha='right')
+
+                create_and_save_figure(
+                    plot_rewards_by_challenge_count,
+                    f'{OUTPUT_VISUALIZATIONS_DIR}/rewards_count_by_challenge.png',
+                    figsize=(14, 7)
+                )
+
+            # Challenge: total points by challenge (show ALL)
+            points_by_challenge = rewards_df.groupby('challenge_name')['reward_points'] \
+                .sum().sort_values(ascending=False)
+            if points_by_challenge.empty:
+                logger.warning("No data for challenge-based points")
+            else:
+                def plot_points_by_challenge():
+                    ax = points_by_challenge.plot(kind='bar', colormap=BAR_COLORMAP)
+                    plt.title('Total Rewarded Points by Challenge')
+                    plt.xlabel('Challenge Name')
+                    plt.ylabel('Total Points')
+                    plt.xticks(rotation=45, ha='right')
+
+                create_and_save_figure(
+                    plot_points_by_challenge,
+                    f'{OUTPUT_VISUALIZATIONS_DIR}/points_by_challenge.png',
+                    figsize=(14, 7)
+                )
+
+            # Rule: count of rewards per rule (Top 30)
+            rule_counts = rewards_df['rule_name'].value_counts().head(30)
+            if rule_counts.empty:
+                logger.warning("No data for rule-based counts")
+            else:
+                def plot_rewards_by_rule_count():
+                    ax = rule_counts.plot(kind='bar', colormap=BAR_COLORMAP)
+                    plt.title('Count of Rewarded Activities by Rule (Top 30)')
+                    plt.xlabel('Rule Name')
+                    plt.ylabel('Count of Rewards')
+                    plt.xticks(rotation=45, ha='right')
+
+                create_and_save_figure(
+                    plot_rewards_by_rule_count,
+                    f'{OUTPUT_VISUALIZATIONS_DIR}/rewards_count_by_rule.png',
+                    figsize=(14, 7)
+                )
+
+            # Rule: total points by rule (show ALL)
+            points_by_rule = rewards_df.groupby('rule_name')['reward_points'] \
+                .sum().sort_values(ascending=False)
+            if points_by_rule.empty:
+                logger.warning("No data for rule-based points")
+            else:
+                def plot_points_by_rule():
+                    ax = points_by_rule.plot(kind='bar', colormap=BAR_COLORMAP)
+                    plt.title('Total Rewarded Points by Rule')
+                    plt.xlabel('Rule Name')
+                    plt.ylabel('Total Points')
+                    plt.xticks(rotation=45, ha='right')
+
+                create_and_save_figure(
+                    plot_points_by_rule,
+                    f'{OUTPUT_VISUALIZATIONS_DIR}/points_by_rule.png',
+                    figsize=(14, 7)
+                )
+
+            # NEW: Per-Activity-Type analysis — points by challenge (ALL challenges per type)
+            try:
+                types_list = [t for t in rewards_df['type'].dropna().unique().tolist()]
+                if not types_list:
+                    logger.warning("No activity types found for per-type challenge analysis")
+                else:
+                    out_dir = os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'by_type')
+                    ensure_dir(out_dir)
+                    for t in types_list:
+                        sub = rewards_df[rewards_df['type'] == t]
+                        series = sub.groupby('challenge_name')['reward_points'].sum().sort_values(ascending=False)
+                        if series.empty:
+                            logger.info(f"No challenge points for activity type '{t}', skipping")
+                            continue
+
+                        fname = os.path.join(out_dir, f"points_by_challenge_type_{safe_filename(t)}.png")
+                        fig_h = compute_barh_fig_height(len(series))
+
+                        def plot_points_by_challenge_for_type(series=series, t=t):
+                            ax = series.plot(kind='barh', colormap=BAR_COLORMAP)
+                            plt.title(f"Total Rewarded Points by Challenge — Activity Type: {t}")
+                            plt.xlabel('Total Points')
+                            plt.ylabel('Challenge Name')
+                            try:
+                                plt.gca().invert_yaxis()  # highest at top
+                            except Exception:
+                                pass
+
+                        create_and_save_figure(
+                            plot_points_by_challenge_for_type,
+                            fname,
+                            figsize=(14, fig_h)
+                        )
+                        logger.info(f"Saved per-type challenge points figure for type '{t}' with {len(series)} challenges to {fname}")
+            except Exception as e:
+                logger.error(f"Error creating per-activity-type challenge analyses: {e}")
+
+            # NEW: Per-Challenge analysis — points by rule (ALL rules per challenge)
+            try:
+                challenges_list = [c for c in rewards_df['challenge_name'].dropna().unique().tolist()]
+                if not challenges_list:
+                    logger.warning("No challenges found for per-challenge rule analysis")
+                else:
+                    out_dir = os.path.join(OUTPUT_VISUALIZATIONS_DIR, 'by_challenge')
+                    ensure_dir(out_dir)
+                    for ch in challenges_list:
+                        sub = rewards_df[rewards_df['challenge_name'] == ch]
+                        series = sub.groupby('rule_name')['reward_points'].sum().sort_values(ascending=False)
+                        if series.empty:
+                            logger.info(f"No rule points for challenge '{ch}', skipping")
+                            continue
+
+                        fname = os.path.join(out_dir, f"points_by_rule_challenge_{safe_filename(ch)}.png")
+                        fig_h = compute_barh_fig_height(len(series))
+
+                        def plot_points_by_rule_for_challenge(series=series, ch=ch):
+                            ax = series.plot(kind='barh', colormap=BAR_COLORMAP)
+                            plt.title(f"Total Rewarded Points by Rule — Challenge: {ch}")
+                            plt.xlabel('Total Points')
+                            plt.ylabel('Rule Name')
+                            try:
+                                plt.gca().invert_yaxis()
+                            except Exception:
+                                pass
+
+                        create_and_save_figure(
+                            plot_points_by_rule_for_challenge,
+                            fname,
+                            figsize=(14, fig_h)
+                        )
+                        logger.info(f"Saved per-challenge rule points figure for challenge '{ch}' with {len(series)} rules to {fname}")
+            except Exception as e:
+                logger.error(f"Error creating per-challenge rule analyses: {e}")
+
+    except Exception as e:
+        logger.error(f"Error creating challenge/rule analyses: {e}")
+    # Continue regardless of errors in this block
+
     # 4. User activity distribution
     try:
         # This visualization shows the number of activities recorded by each user
@@ -1242,6 +1592,154 @@ Optional[Tuple]:
         logger.error(f"Error calculating or visualizing joining rates: {e}")
         joining_metrics = None
 
+    # Churn rate (no activity for 30 days) over time
+    try:
+        if activities.empty:
+            logger.warning("No activities data available for churn rate visualization")
+        else:
+            # Prepare daily activity matrix by user
+            daily = activities.copy()
+            # Ensure 'date' is datetime (normalized to date)
+            daily['date'] = pd.to_datetime(daily['date'])
+            # Use a stable string representation for pid to avoid dtype mismatches during reindexing
+            try:
+                daily['pid_str'] = daily['pid'].astype(str)
+            except Exception:
+                daily['pid_str'] = daily['pid']
+
+            # Build complete campaign date range
+            series_start = daily['date'].min()
+            series_end = daily['date'].max()
+            date_index = pd.date_range(series_start, series_end, freq='D')
+
+            # Build pivot table: rows = date, cols = pid (as string), value = any activity that day (bool)
+            try:
+                active_pivot = (
+                    daily.groupby(['date', 'pid_str']).size()
+                        .unstack(fill_value=0)
+                        .reindex(index=date_index, fill_value=0)
+                )
+            except Exception as e:
+                logger.error(f"Error preparing daily activity pivot for churn: {e}")
+                active_pivot = pd.DataFrame(index=date_index)
+
+            if active_pivot.shape[1] == 0:
+                logger.warning("No user activity columns available for churn rate computation")
+            else:
+                # Boolean matrix: True if user was active on that day
+                active_bool = active_pivot > 0
+
+                # First activity date per user (joined date)
+                # Compute robustly from raw daily data (by pid_str), avoiding boolean masking pitfalls
+                try:
+                    first_activity_series = (
+                        daily.groupby('pid_str')['date'].min()
+                            .reindex(active_bool.columns)
+                    )
+                    # Ensure proper datetime dtype
+                    first_activity_series = pd.to_datetime(first_activity_series)
+                except Exception as e:
+                    logger.error(f"Error computing first activity dates for churn (groupby): {e}")
+                    # Fallback: attempt via boolean mask stack (may be slower / brittle)
+                    try:
+                        stacked = active_bool[active_bool].stack().reset_index()
+                        stacked.columns = ['date', 'pid_str', 'active']
+                        first_activity_series = (
+                            stacked.groupby('pid_str')['date'].min()
+                                   .reindex(active_bool.columns)
+                        )
+                        first_activity_series = pd.to_datetime(first_activity_series)
+                    except Exception as e2:
+                        logger.error(f"Fallback method for first activity dates failed: {e2}")
+                        first_activity_series = pd.Series(index=active_bool.columns, dtype='datetime64[ns]')
+
+                # Users considered in denominator: those who have joined by given date
+                try:
+                    idx_vals = active_bool.index.values.astype('datetime64[ns]')
+                    fa_vals = first_activity_series.values.astype('datetime64[ns]')
+                    # joined_mask[date, pid] = date >= first_activity(pid)
+                    joined_mask = pd.DataFrame(
+                        idx_vals[:, None] >= fa_vals[None, :],
+                        index=active_bool.index,
+                        columns=active_bool.columns
+                    )
+                except Exception as e:
+                    logger.error(f"Error building joined mask for churn: {e}")
+                    joined_mask = pd.DataFrame(False, index=active_bool.index, columns=active_bool.columns)
+
+                # Whether user has been active in the last 30 days (including current date)
+                try:
+                    active_last_30 = active_bool.rolling(window=30, min_periods=1).sum() > 0
+                except Exception as e:
+                    logger.error(f"Error computing 30-day rolling activity for churn: {e}")
+                    active_last_30 = active_bool.copy()
+
+                # Churned users at date: joined but no activity in last 30 days
+                churned_mask = (~active_last_30) & joined_mask
+
+                # Aggregate counts per day
+                churned_count = churned_mask.sum(axis=1)
+                joined_count = joined_mask.sum(axis=1)
+                # Avoid division by zero
+                with pd.option_context('mode.use_inf_as_na', True):
+                    denom = joined_count.replace(0, float('nan')).astype(float)
+                    churn_rate = (churned_count.astype(float) / denom).fillna(0.0)
+
+                churn_df = pd.DataFrame({
+                    'date': churn_rate.index,
+                    'churned_count': churned_count.values,
+                    'joined_count': joined_count.values,
+                    'churn_rate': churn_rate.values
+                }).set_index('date')
+
+                # Sanity check: if we have activity but joined_count stays zero, log a warning for diagnostics
+                try:
+                    if active_bool.values.sum() > 0 and churn_df['joined_count'].max() == 0:
+                        logger.warning(
+                            "Joined count is zero for all days despite existing activities. "
+                            "This typically indicates pid alignment issues. Using pid as string in this block."
+                        )
+                except Exception:
+                    pass
+
+                # Plot churn rate over time
+                def plot_churn_rate_over_time():
+                    plt.plot(churn_df.index, churn_df['churn_rate'] * 100.0, color='tab:purple', linewidth=2)
+                    plt.title('Churn Rate Over Time (No activity in last 30 days)')
+                    plt.xlabel('Date')
+                    plt.ylabel('Churn Rate (%)')
+                    # Add a subtle grid for readability
+                    plt.grid(alpha=0.3, linestyle='--', linewidth=0.5)
+
+                create_and_save_figure(
+                    plot_churn_rate_over_time,
+                    f'{OUTPUT_VISUALIZATIONS_DIR}/churn_rate_over_time.png',
+                    figsize=(12, 6)
+                )
+
+                # Optional: plot churned and joined counts for context when data is large enough
+                try:
+                    if len(churn_df) <= 180:  # avoid overly dense bar chart for very long campaigns
+                        def plot_churn_counts():
+                            plt.plot(churn_df.index, churn_df['joined_count'], label='Joined (cumulative)', color='tab:blue')
+                            plt.plot(churn_df.index, churn_df['churned_count'], label='Churned', color='tab:orange')
+                            plt.title('Joined vs Churned Users Over Time (30-day inactivity)')
+                            plt.xlabel('Date')
+                            plt.ylabel('Number of Users')
+                            plt.legend()
+                            plt.grid(alpha=0.3, linestyle='--', linewidth=0.5)
+
+                        create_and_save_figure(
+                            plot_churn_counts,
+                            f'{OUTPUT_VISUALIZATIONS_DIR}/churn_counts_over_time.png',
+                            figsize=(12, 6)
+                        )
+                except Exception as e:
+                    logger.warning(f"Unable to create churn counts plot: {e}")
+    except Exception as e:
+        logger.error(f"Error creating churn rate visualization: {e}")
+    # Continue with other visualizations even if this one fails
+
     # 2. Bar chart of usage by day of week (using only date information)
     try:
         if activities.empty:
@@ -1469,6 +1967,8 @@ Optional[Tuple]:
                                 ax.tick_params(axis='x', rotation=90)
                                 for tick in ax.get_xticklabels():
                                     tick.set_horizontalalignment('center')
+                            # Truncate long labels on axes/legend before saving
+                            _apply_label_truncation(plt.gcf(), LABEL_MAX_CHARS)
                             plt.tight_layout()
                             plt.savefig(f"{OUTPUT_VISUALIZATIONS_DIR}/activity_types_stacked_by_date.png",
                                         bbox_inches='tight')

@@ -1,4 +1,4 @@
-# GameBus Data Analyzer
+# GameBus Data Analyzer v1.0
 
 A tool for extracting and analyzing health behavior data from the GameBus platform.
 
@@ -115,6 +115,7 @@ If `pip` is not recognized, always prefer `python -m pip ...` on Windows.
 
 10) Where results appear
 - Raw JSON: `data_raw\`
+- User-email mapping: `data_raw\user_email_mapping.txt` (auto-generated after extraction)
 - Analysis outputs: `data_analysis\`
 - Logs: `logs\data_extraction.log` and `logs\data_analysis.log`
 
@@ -143,6 +144,8 @@ gamebus-data-analyzer/
 ## Outputs and Logs
 
 - Raw API data is saved under `data_raw/` as JSON files (e.g., `player_<id>_<descriptor>.json`) and a combined `player_<id>_all_raw.json` per user.
+- After extraction finishes, a user-email mapping file is written to `data_raw/user_email_mapping.txt`.
+  - Format: `player_id=<pid> user_id=<uid>: <email>` (if account `user_id` cannot be determined, `-` is used).
 - Analysis results are saved under `data_analysis/` (e.g., `analysis_report.txt` and generated figures).
 - Logs are written to `logs/data_extraction.log` (extraction) and `logs/data_analysis.log` (analysis).
 - Tip: use `--log-level DEBUG` for more verbose output when running `pipeline.py`.
@@ -298,3 +301,17 @@ Example to override in code (optional per script):
   - import seaborn as sns
   - sns.set_palette("deep")  # or any seaborn palette name
   - Or change BAR_COLORMAP/SEQUENTIAL_HEATMAP_COLORMAP constants in data_analysis.py.
+
+## Change Log
+- 1.1 (2025-12-03): Analysis, visualization, and logging improvements
+  - New analyses using rewardedParticipations:
+    - Group by Challenge name and by Rule name with figures:
+      - `rewards_count_by_challenge.png`, `points_by_challenge.png`
+      - `rewards_count_by_rule.png`, `points_by_rule.png`
+  - Nested analyses:
+    - Per activity type: total rewarded points by challenge → files under `data_analysis/by_type/` (e.g., `points_by_challenge_type_<TYPE>.png`)
+    - Per challenge: total rewarded points by rule → files under `data_analysis/by_challenge/` (e.g., `points_by_rule_challenge_<CHALLENGE>.png`)
+  - Churn plots:
+    - `churn_counts_over_time.png`
+    - `churn_rate_over_time.png`
+- 1.0: Initial release

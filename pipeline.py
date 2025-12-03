@@ -13,6 +13,7 @@ from src.extraction.gamebus_client import GameBusClient
 from src.extraction.data_collectors import AllDataCollector
 from src.utils.logging import setup_logging
 from src.analysis.data_analysis import main as run_analysis
+from src.scripts.create_user_email_mapping import main as build_user_email_mapping
 
 def parse_args():
     """Parse command line arguments."""
@@ -163,6 +164,8 @@ def run_extraction(user_row: pd.Series) -> Dict[str, List[Dict[str, Any]]]:
                 logger.info(f"  - {file_path}")
         else:
             logger.warning(f"Collected data for {len(data_dict)} data types, but no files were created")
+        # Explicit console log indicating a successful extraction for this user
+        logger.info(f"Successful extraction for user: {username}")
     else:
         logger.warning(f"No data collected for user {username}")
 
@@ -266,6 +269,27 @@ def main():
                 logger.info("Continuing with analysis using partial results...")
             else:
                 return
+
+        # After successful extraction phase, generate the user-email mapping file
+        try:
+            logger.info("Generating user-email mapping file after extraction...")
+            build_user_email_mapping()
+            logger.info("User-email mapping file generated successfully")
+        except Exception as e:
+            logger.error(f"Failed to generate user-email mapping file: {e}")
+
+        # Console summary for extraction success
+        try:
+            total_users = len(users_df)
+            processed_users = len(all_results)
+            successful_users = sum(1 for _email, res in all_results.items() if bool(res))
+            logger.info(
+                f"Extraction summary: {successful_users}/{total_users} users with data collected "
+                f"({processed_users} processed)."
+            )
+            logger.info("Data extraction phase completed successfully")
+        except Exception as e:
+            logger.warning(f"Could not compute extraction summary: {e}")
 
     # Run data analysis if needed
     if should_run_analysis:

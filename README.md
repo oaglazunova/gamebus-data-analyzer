@@ -1,4 +1,4 @@
-# GameBus Data Analyzer v1.0
+# GameBus Data Analyzer v1.1
 
 A tool for extracting and analyzing health behavior data from the GameBus platform.
 
@@ -168,8 +168,18 @@ Running `python -m src.analysis.data_analysis` or `python pipeline.py --analyze`
 - Player engagement heatmap (by day) → `player_engagement_heatmap.png`
 - Activities by day of week → `usage_by_day_of_week.png`
 
+- Wave comparisons:
+  - Overall comparison across waves → `wave_comparisons.png`
+  - By player → `wave_comparisons_by_player.png`
+  - By activity type → `wave_comparisons_by_activity_type.png`
+  - Points by activity type per wave → `wave_points_by_activity_type.png`
+
 **Campaign metrics & participation**
 - Active vs Passive players (by rewarded tasks) → `player_active_vs_passive_pie.png`
+
+- Churn:
+  - Churn counts over time → `churn_counts_over_time.png`
+  - Churn rate over time → `churn_rate_over_time.png`
 
 - **Drop-out & joining**
 - Drop-out histogram (first → last activity, days) → `dropout_rates_distribution.png`
@@ -185,6 +195,14 @@ Running `python -m src.analysis.data_analysis` or `python pipeline.py --analyze`
 - Tasks by provider (mapped via `desc_tasks.dataproviders`, zero bars if none found) → `tasks_by_provider.png`
 - Tasks completed per day → `tasks_completed_per_day.png`
 - Tasks completed per player → `tasks_completed_per_player.png`
+
+**Rewards (from rewardedParticipations in activities data)**
+- Reward counts by challenge → `rewards_count_by_challenge.png`
+- Total rewarded points by challenge → `points_by_challenge.png`
+- Reward counts by rule → `rewards_count_by_rule.png`
+- Total rewarded points by rule → `points_by_rule.png`
+- Per activity type: total rewarded points by challenge → files under `data_analysis/by_type/` (e.g., `points_by_challenge_type_<TYPE>.png`)
+- Per challenge: total rewarded points by rule → files under `data_analysis/by_challenge/` (e.g., `points_by_rule_challenge_<CHALLENGE>.png`)
 
 **Geofence & steps (from JSON in `data_raw/`)**
 - Geofence hourly activity → `geofence_hourly_activity.png`

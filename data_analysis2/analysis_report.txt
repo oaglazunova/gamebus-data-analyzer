@@ -1,0 +1,19 @@
+GameBus Data Analysis Report
+===========================
+
+1. Data Loading
+---------------
+✓ Excel data loaded successfully: 12 sheets
+✓ JSON data loaded successfully: 118 files
+
+2. Campaign Summary
+--------------------
+HW8 BIPS (HW8 BIPS)
+
+Start Date: 2025-02-13
+End Date: 2025-08-05
+Length: 172 days
+Total number of Players in the Campaign: 35
+Active Players (rewarded): 31
+Passive Players (enrolled, never rewarded): 4
+Passive Player IDs: 472, 487, 488, 504

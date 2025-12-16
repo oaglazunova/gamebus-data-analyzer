@@ -1,0 +1,9 @@
+column,n,missing,missing_pct,nunique,top,top_count
+waveReference,3057,0,0.0,1,pilotWave,3057
+createdAt,3057,0,0.0,3052,2025-03-13 13:36:28.028000+00:00,2
+type,3057,0,0.0,8,GENERAL_ACTIVITY,1269
+provider,3057,0,0.0,2,GameBus Studio,2481
+rewardedParticipations,3057,0,0.0,497,"[{""points"":4,""rule"":""Machen Sie während des Mittagessens eine Pause im Freien     [Take a Break Outdoor during Lunch]"",""challenge"":{""xid"":4239,""name"":""Achtsamer Anführer     [Mindful Leader]""},""circle"":{""cid"":949,""name"":""H5 iOS""}}]",96
+date,3057,0,0.0,152,2025-06-13 00:00:00+00:00,210
+detailed_rewards,3057,0,0.0,497,"[{""challenge"": {""name"": ""Achtsamer Anführer     [Mindful Leader]"", ""xid"": 4239}, ""circle"": {""cid"": 949, ""name"": ""H5 iOS""}, ""points"": 4, ""rule"": ""Machen Sie während des Mittagessens eine Pause im Freien     [Take a Break Outdoor during Lunch]""}]",96
+engagement_by_rewards,3057,0,0.0,1,Active,3057

@@ -1,0 +1,86 @@
+USAGE METRICS
+=============
+Participating users (completing activities):
+  - Active users: 31/35 (88.6%)
+  - Passive users: 4/35 (11.4%)
+
+Average active days / participant: 23.81 ± 20.19 days
+Active players per day: 4.86 ± 3.16 players/day
+Average time to first inactivity (proxy = last-first activity): 51.81 ± 45.58 days
+
+Retention rate / week (% active users among all participants):
+  - Week 1: 2 active users (5.7%)
+  - Week 2: 2 active users (5.7%)
+  - Week 3: 1 active users (2.9%)
+  - Week 4: 7 active users (20.0%)
+  - Week 5: 9 active users (25.7%)
+  - Week 6: 10 active users (28.6%)
+  - Week 7: 7 active users (20.0%)
+  - Week 8: 8 active users (22.9%)
+  - Week 9: 11 active users (31.4%)
+  - Week 10: 10 active users (28.6%)
+  - Week 11: 13 active users (37.1%)
+  - Week 12: 24 active users (68.6%)
+  - Week 13: 21 active users (60.0%)
+  - Week 14: 17 active users (48.6%)
+  - Week 15: 13 active users (37.1%)
+  - Week 16: 10 active users (28.6%)
+  - Week 17: 8 active users (22.9%)
+  - Week 18: 6 active users (17.1%)
+  - Week 19: 8 active users (22.9%)
+  - Week 20: 7 active users (20.0%)
+  - Week 21: 6 active users (17.1%)
+  - Week 22: 4 active users (11.4%)
+  - Week 23: 3 active users (8.6%)
+  - Week 24: 2 active users (5.7%)
+  - Week 25: 3 active users (8.6%)
+
+Usage time / day of week (% of activities):
+  - Monday: 468 (15.3%)
+  - Tuesday: 418 (13.7%)
+  - Wednesday: 550 (18.0%)
+  - Thursday: 481 (15.7%)
+  - Friday: 556 (18.2%)
+  - Saturday: 291 (9.5%)
+  - Sunday: 293 (9.6%)
+
+Usage time / hour of day buckets (% of activities):
+  - morning (6AM-11AM): 863 (28.2%)
+  - afternoon (12PM-5PM): 1352 (44.2%)
+  - evening (6PM-11PM): 689 (22.5%)
+  - night (12AM-5AM): 153 (5.0%)
+
+Peak activity hour: 12:00
+
+INTERACTION METRICS
+===================
+Activities distribution (% per type):
+  - GENERAL_ACTIVITY: 1269 (41.5%)
+  - PHYSICAL_ACTIVITY: 573 (18.7%)
+  - VISIT_APP_PAGE: 526 (17.2%)
+  - NUTRITION_DIARY: 364 (11.9%)
+  - DRINKING_DIARY: 269 (8.8%)
+  - PLAN_MEAL: 47 (1.5%)
+  - WALK: 6 (0.2%)
+  - NUTRITION_SUMMARY: 3 (0.1%)
+
+Tasks by data provider (% of task completions):
+  - GameBus Studio: 2481 (77.5%)
+  - Nutrida: 576 (18.0%)
+  - GameBus: 129 (4.0%)
+  - GameBus Tracker: 6 (0.2%)
+  - Google Fit: 6 (0.2%)
+  - GameBus Watch App: 4 (0.1%)
+
+Average completed activities / participant: 98.61 ± 156.62 activities
+Average rewarded points / participant: 421.77 ± 800.58 points
+
+Rewarded points by activity type (% of total points):
+  - GENERAL_ACTIVITY: 5615 points (42.9%)
+  - NUTRITION_DIARY: 2655 points (20.3%)
+  - PHYSICAL_ACTIVITY: 1799 points (13.8%)
+  - VISIT_APP_PAGE: 1578 points (12.1%)
+  - DRINKING_DIARY: 1064 points (8.1%)
+  - PLAN_MEAL: 304 points (2.3%)
+  - NUTRITION_SUMMARY: 30 points (0.2%)
+  - WALK: 30 points (0.2%)

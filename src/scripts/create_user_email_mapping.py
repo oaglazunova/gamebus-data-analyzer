@@ -159,7 +159,7 @@ def _determine_user_id(client: GameBusClient, token: str, player_id: int) -> Opt
     # Iterate over a small subset of descriptors first, then all
     descriptors_to_try = list(VALID_GAME_DESCRIPTORS[:])
     # Heuristic: quickly try a few common ones first by placing them at front if present
-    common_first = ["LOG_MOOD", "STEPS", "GEOFENCE", "NUTRITION_SUMMARY"]
+    common_first = ["LOG_MOOD", "STEPS",  "NUTRITION_SUMMARY"]
     for d in reversed(common_first):
         if d in descriptors_to_try:
             descriptors_to_try.remove(d)

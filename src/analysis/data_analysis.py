@@ -274,6 +274,37 @@ def _bucket_hour(h: int) -> str:
 # -----------------------------------------------------------------------------
 # Descriptive statistics tables
 # -----------------------------------------------------------------------------
+def get_campaign_waves(csv_data: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+    waves = csv_data.get("desc_waves")
+    if not isinstance(waves, pd.DataFrame) or waves.empty:
+        return pd.DataFrame()
+
+    required = {"start", "end"}
+    if not required.issubset(waves.columns):
+        return pd.DataFrame()
+
+    out = waves.copy()
+    out["start"] = pd.to_datetime(out["start"], errors="coerce", utc=True)
+    out["end"] = pd.to_datetime(out["end"], errors="coerce", utc=True)
+    out = out.dropna(subset=["start", "end"]).sort_values("start").reset_index(drop=True)
+    return out
+
+
+def assign_campaign_wave(activities: pd.DataFrame, csv_data: Dict[str, pd.DataFrame]) -> pd.Series:
+    waves = get_campaign_waves(csv_data)
+    if waves.empty:
+        start = activities["date"].min()
+        if pd.isna(start):
+            return pd.Series([pd.NA] * len(activities), index=activities.index)
+        return ((activities["date"] - start).dt.days // 7) + 1
+
+    result = pd.Series([pd.NA] * len(activities), index=activities.index, dtype="object")
+    for i, row in waves.iterrows():
+        mask = (activities["createdAt"] >= row["start"]) & (activities["createdAt"] <= row["end"])
+        result.loc[mask] = i + 1
+    return result
+
+
 def generate_descriptive_stats(
     df: pd.DataFrame, title: str, filename: Optional[str] = None
 ) -> Dict[str, pd.DataFrame]:
@@ -890,11 +921,7 @@ def analyze_activities(
         activities["date"] = activities["createdAt"].dt.floor("D")
         activities["hour"] = activities["createdAt"].dt.hour
 
-        start = activities["date"].min()
-        if pd.isna(start):
-            activities["wave"] = pd.NA
-        else:
-            activities["wave"] = ((activities["date"] - start).dt.days // 7) + 1
+        activities["wave"] = assign_campaign_wave(activities, csv_data)
 
         # Rewards parsing
         activities["points"] = activities["rewardedParticipations"].apply(extract_points)
@@ -1482,8 +1509,15 @@ def analyze_activities(
 
     try:
         unique_users_count = int(activities["pid"].nunique())
-        campaign_start = activities["createdAt"].min()
-        campaign_end = activities["createdAt"].max()
+        waves = get_campaign_waves(csv_data)
+        campaign_start = waves["start"].min()
+        campaign_end = waves["end"].max()
+        # if not waves.empty:
+        #     campaign_start = waves["start"].min()
+        #     campaign_end = waves["end"].max()
+        # else:
+        #     campaign_start = activities["createdAt"].min()
+        #     campaign_end = activities["createdAt"].max()
         campaign_length_days = int((campaign_end - campaign_start).days) if pd.notna(campaign_start) and pd.notna(campaign_end) else 0
 
         campaign_name = "GameBus Campaign"
@@ -1802,7 +1836,6 @@ def analyze_activities(
     try:
         user_day = pd.crosstab(index=activities["pid"], columns=activities["date"]).fillna(0)
         if not user_day.empty:
-            users = user_day.sum(axis=1).sort_values(ascending=False)
 
             # limit days
             cols = list(user_day.columns)
@@ -1810,7 +1843,9 @@ def analyze_activities(
             if len(cols_sorted) > MAX_DAYS_HEATMAP:
                 cols_sorted = cols_sorted[-MAX_DAYS_HEATMAP:]
 
-            heat = user_day.loc[users, cols_sorted].copy()
+            user_order = user_day.sum(axis=1).sort_values(ascending=False).index
+            heat = user_day.loc[user_order, cols_sorted].copy()
+
             # Format column labels
             try:
                 heat.columns = [pd.to_datetime(d).strftime("%Y-%m-%d") for d in heat.columns]

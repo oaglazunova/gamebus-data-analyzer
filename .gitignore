@@ -1,7 +1,9 @@
 .env
 .venv/
 data_raw/
-data_analysis
+data_analysis/
+data_raw*/
+data_analysis*/
 *.xlsx
 old/
 api docs/

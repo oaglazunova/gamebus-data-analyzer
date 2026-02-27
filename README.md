@@ -9,7 +9,7 @@ The script can technically run on Linux and Mac, but officially we support only 
 
 ## Quick Start
 
-1. **Install Python** and clone this repository
+1. **Install Python** (preferably versions 3.9 or 3.11) and clone this repository
 2. **Set up environment**: 
    ```
    python -m venv .venv

@@ -9,9 +9,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Get API key from environment variable
-AUTHCODE = os.getenv('GAMEBUS_API_KEY')
-if not AUTHCODE:
-    raise ValueError("GAMEBUS_API_KEY environment variable is not set. Please add it to your .env file.")
+AUTHCODE = os.getenv("GAMEBUS_API_KEY")
+
+def require_authcode() -> str:
+    authcode = os.getenv("GAMEBUS_API_KEY")
+    if not authcode:
+        raise ValueError(
+            "GAMEBUS_API_KEY environment variable is not set. "
+            "Please add it to your .env file."
+        )
+    return authcode
 
 # Default API endpoints
 # BASE_URL = "https://api-new.gamebus.eu/v2"

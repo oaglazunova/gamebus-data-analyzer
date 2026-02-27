@@ -30,7 +30,7 @@ def setup_logging(log_to_file: bool = True, log_level: str = None, log_type: str
 
     # Create logger
     logger_name = f"gamebus_health_mining.{log_type}"
-    logger = logging.getLogger(logger_name)
+    logger = logging.getLogger()
     logger.setLevel(numeric_level)
 
     # Clear any existing handlers to avoid duplicate logs
@@ -63,8 +63,5 @@ def setup_logging(log_to_file: bool = True, log_level: str = None, log_type: str
         file_handler.setLevel(numeric_level)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
-
-    # Prevent propagation to root logger to avoid duplicate logs
-    logger.propagate = False
 
     return logger 

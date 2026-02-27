@@ -7,13 +7,12 @@ import logging
 import concurrent.futures
 from typing import List, Dict, Any
 
-from config.credentials import AUTHCODE
-from config.paths import USERS_FILE_PATH
-from src.extraction.gamebus_client import GameBusClient
-from src.extraction.data_collectors import AllDataCollector
+from config.credentials import require_authcode
 from src.utils.logging import setup_logging
 from src.analysis.data_analysis import main as run_analysis
 from src.scripts.create_user_email_mapping import main as build_user_email_mapping
+
+from config.paths import USERS_FILE_PATH
 
 def parse_args():
     """Parse command line arguments."""
@@ -65,98 +64,46 @@ def load_users(users_file: str) -> pd.DataFrame:
         raise
 
 def run_extraction(user_row: pd.Series) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Run the extraction step for a single user.
+    from src.extraction.gamebus_client import GameBusClient
+    from src.extraction.data_collectors import AllDataCollector
+    import time
 
-    Args:
-        user_row: User data row from DataFrame
-
-    Returns:
-        Dictionary of collected data by type
-    """
     username = user_row['email']
     password = user_row['password']
 
     logger = logging.getLogger(__name__)
     logger.info(f"Starting extraction for user: {username}")
 
-    # Initialize GameBus client
-    logger.info(f"Initializing GameBus client for user: {username}")
-    client = GameBusClient(AUTHCODE)
+    client = GameBusClient(require_authcode())
 
-    # Get user token and ID
-    logger.info(f"Getting user token for user: {username}")
     token = client.get_user_token(username, password)
     if not token:
         logger.error(f"Failed to get token for user {username}")
         return {}
 
-    logger.info(f"Getting player ID for user: {username}")
     user_id_result = client.get_user_id(token)
     if not user_id_result:
         logger.error(f"Failed to get player ID for user {username}")
         return {}
 
-    # Extract the numeric ID and email from the tuple
     user_id, user_email = user_id_result
-
     logger.info(f"Successfully authenticated user {username} with player ID {user_id}")
 
-    # Collect data based on requested types
     results = {}
-
-    # Import threading and time for timeout handling
-    import threading
-    import time
-
-    # Always use the AllDataCollector to extract all data types
-    logger.info(f"Using AllDataCollector to extract all data types for user {username}")
-
-    # Create the AllDataCollector
     all_collector = AllDataCollector(client, token, user_id, user_email)
 
-    # Flag to indicate if collection is complete
-    collection_complete = False
-    collection_result = [None, None]  # [data_dict, file_paths]
-    collection_error = [None]  # Error message
-
-    def collect_all_data():
-        try:
-            data_dict, file_paths = all_collector.collect()
-            collection_result[0] = data_dict
-            collection_result[1] = file_paths
-            nonlocal collection_complete
-            collection_complete = True
-        except Exception as e:
-            collection_error[0] = str(e)
-            collection_complete = True
-
-    # Start collection in a separate thread
-    logger.info(f"Starting collection of ALL data types for user {username}")
-    collection_thread = threading.Thread(target=collect_all_data)
-    collection_thread.daemon = True
-    collection_thread.start()
-
-    # Wait for collection to complete or timeout
-    start_time = time.time()
-    timeout = 300  # 5 minutes timeout for all data collection
-
-    while not collection_complete and (time.time() - start_time) < timeout:
-        logger.info(f"Waiting for ALL data collection to complete for user {username}...")
-        time.sleep(20)  # Check every 20 seconds
-
-    if not collection_complete:
-        logger.error(f"Timeout while collecting ALL data for user {username}")
+    try:
+        start = time.time()
+        logger.info(f"Starting collection of ALL data types for user {username}")
+        data_dict, file_paths = all_collector.collect()
+        elapsed = time.time() - start
+        logger.info(f"Finished collection for user {username} in {elapsed:.1f}s")
+    except Exception as e:
+        logger.error(f"Failed to collect ALL data for user {username}: {e}")
+        logger.exception(e)
         return results
-
-    if collection_error[0]:
-        logger.error(f"Failed to collect ALL data for user {username}: {collection_error[0]}")
-        return results
-
-    data_dict, file_paths = collection_result
 
     if data_dict:
-        # Add all collected data to results
         results = data_dict
         if file_paths:
             logger.info(f"Collected data for {len(data_dict)} data types, saved to {len(file_paths)} files")
@@ -164,13 +111,13 @@ def run_extraction(user_row: pd.Series) -> Dict[str, List[Dict[str, Any]]]:
                 logger.info(f"  - {file_path}")
         else:
             logger.warning(f"Collected data for {len(data_dict)} data types, but no files were created")
-        # Explicit console log indicating a successful extraction for this user
         logger.info(f"Successful extraction for user: {username}")
     else:
         logger.warning(f"No data collected for user {username}")
 
     logger.info(f"Completed extraction for user: {username}")
     return results
+
 
 def main():
     """Main function to run the pipeline."""
@@ -217,12 +164,15 @@ def main():
         users_df = load_users(USERS_FILE_PATH)
         logger.info(f"Loaded {len(users_df)} users from {USERS_FILE_PATH}")
 
+        if users_df.empty:
+            logger.warning("No users found in the users file. Skipping extraction.")
+            if not should_run_analysis:
+                return
+        else:
+            max_workers = min(1, len(users_df))
+
         # Process all users
         all_results = {}
-
-        # Use a thread pool to process users in parallel
-        max_workers = min(10, len(users_df))  # Limit the number of concurrent workers
-        logger.info(f"Using {max_workers} workers for parallel processing")
 
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -294,6 +244,7 @@ def main():
     # Run data analysis if needed
     if should_run_analysis:
         logger.info("Starting data analysis...")
+        setup_logging(log_level=args.log_level, log_type="analysis")
         run_analysis()
         logger.info("Data analysis completed")
 

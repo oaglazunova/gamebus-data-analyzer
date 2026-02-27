@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import os
 import re
 import json
 from typing import Tuple, Dict, Optional, Union, List
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+import logging
 
-from src.analysis.common import OUTPUT_VISUALIZATIONS_DIR, create_and_save_figure, BAR_COLORMAP, \
-    SEQUENTIAL_HEATMAP_COLORMAP, MAX_TYPES_HEATMAP, PLOT_FIGSIZE_ACTIVITY_TYPES_STACKED, ensure_output_dirs, logger
+from src.analysis.common import OUTPUT_VISUALIZATIONS_DIR, MAX_TYPES_HEATMAP, ensure_output_dirs, logger
 from src.analysis.loaders import extract_detailed_rewards, load_excel_files, load_json_files
 from src.analysis.reporting import generate_descriptive_stats, generate_descriptive_summary_text, create_complete_report
 from src.analysis.activity_metrics import (
@@ -45,6 +42,7 @@ from src.analysis.activity_plots import (
     save_geofence_movement_trajectory_plot, save_geofence_3d_visualization_plot, save_active_passive_pie_chart,
     save_steps_trend_plot
 )
+from src.utils.logging import setup_logging, console_info, console_error
 
 # -----------------------------------------------------------------------------
 # Activities analysis (core)
@@ -754,6 +752,12 @@ def analyze_day_aggregate_steps(
 # Main
 # -----------------------------------------------------------------------------
 def main() -> None:
+    # If analysis is run directly (not via pipeline), configure logging here
+    if not logging.getLogger().handlers:
+        setup_logging(log_type="analysis")
+
+    console_info(logger, "[ANALYZE] Loading input files")
+
     try:
         ensure_output_dirs()
 
@@ -771,6 +775,9 @@ def main() -> None:
         except Exception as e:
             logger.error(f"Error loading JSON files: {e}")
             json_data = {}
+
+        console_info(logger, f"[ANALYZE] Loaded {len(csv_data)} Excel sheet(s)")
+        console_info(logger, f"[ANALYZE] Loaded {len(json_data)} JSON file(s)")
 
         # Analyze activities
         try:
@@ -806,21 +813,34 @@ def main() -> None:
         except Exception as e:
             logger.error(f"Error analyzing visualizations/challenges/tasks: {e}")
 
+        if result:
+            console_info(logger, f"[ANALYZE] Activities analyzed | unique active users={unique_users_count}")
+        else:
+            console_info(logger, "[ANALYZE] Activities analysis skipped or produced no result")
+
         # Report
         try:
             report_result = result if result else activities
             report_path = create_complete_report(csv_data, json_data, report_result)
             logger.info(f"Report written to: {report_path}")
-        except Exception as e:
-            logger.error(f"Error generating report: {e}")
+            console_info(logger, f"[ANALYZE] Report written: {report_path}")
+        except Exception:
+            logger.error("Error generating report", exc_info=True)
+            console_info(logger, "[ANALYZE] Report generation failed; see log file")
 
-        print("\nAnalysis complete.")
-        print(f"- Visualizations and outputs saved to: '{OUTPUT_VISUALIZATIONS_DIR}'")
+        console_info(logger, f"[ANALYZE] Outputs saved to: {OUTPUT_VISUALIZATIONS_DIR}")
+        console_info(logger, "[ANALYZE] Completed")
 
-    except Exception as e:
-        logger.error(f"Unexpected error in main(): {e}")
-        print("An error occurred during analysis. See log file for details.")
+
+    except Exception:
+        logger.error("Unexpected error in main()", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        console_info(logger, "[ANALYZE] Interrupted by user")
+    except Exception:
+        console_error(logger, "[ANALYZE] Failed; see log file")

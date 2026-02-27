@@ -1,4 +1,4 @@
-# GameBus Data Analyzer v1.2
+# GameBus Data Analyzer v1.5
 
 A tool for extracting and analyzing health behavior data from the GameBus platform.
 

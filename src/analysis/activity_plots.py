@@ -13,7 +13,7 @@ from src.analysis.common import (
     _apply_label_truncation,
     LABEL_MAX_CHARS,
     create_and_save_figure,
-    logger, MAX_DAYS_HEATMAP, compute_barh_fig_height, safe_filename, ensure_dir, PIE_COLORMAP,
+    logger, MAX_DAYS_HEATMAP, compute_barh_fig_height, safe_filename, ensure_dir, PIE_COLORMAP, build_scoped_plot_filename
 )
 
 
@@ -84,6 +84,7 @@ def _save_daily_bar_plot(
     )
 
 
+
 def save_activity_types_distribution_plot(activity_counts: pd.Series) -> None:
     _save_category_bar_plot(
         activity_counts,
@@ -147,12 +148,21 @@ def save_points_over_time_plot(daily_points: pd.Series) -> None:
     )
 
 
-def save_activity_heatmap_by_time_plot(activity_heatmap_data: pd.DataFrame) -> None:
+def save_activity_heatmap_by_time_plot(
+    activity_heatmap_data: pd.DataFrame,
+    *,
+    scope_label: str = "Combined",
+    filename: str | None = None,
+    exclude_day_aggregate_note: bool = True,
+) -> None:
     if activity_heatmap_data is None or activity_heatmap_data.empty:
         return
 
     if activity_heatmap_data.values.sum() <= 0:
         return
+
+    if filename is None:
+        filename = build_scoped_plot_filename("activity_heatmap_by_time", scope_label)
 
     def plot() -> None:
         sns.heatmap(
@@ -162,13 +172,22 @@ def save_activity_heatmap_by_time_plot(activity_heatmap_data: pd.DataFrame) -> N
             fmt=".0f",
             linewidths=0.5,
         )
-        plt.title("Activity Heatmap by Day of Week and Hour of Day")
+        plt.title(f"{scope_label}: Activity Heatmap by Day of Week and Hour of Day")
         plt.xlabel("Hour of Day")
         plt.ylabel("Day of Week")
 
+        if exclude_day_aggregate_note:
+            plt.figtext(
+                0.5,
+                -0.04,
+                "Timing analysis excludes DAY_AGGREGATE where applicable.",
+                ha="center",
+                fontsize=9,
+            )
+
     create_and_save_figure(
         plot,
-        os.path.join(OUTPUT_VISUALIZATIONS_DIR, "activity_heatmap_by_time.png"),
+        os.path.join(OUTPUT_VISUALIZATIONS_DIR, filename),
         figsize=(15, 8),
     )
 
@@ -214,9 +233,18 @@ def save_player_activity_distribution_plot(user_activity: pd.Series) -> None:
     )
 
 
-def save_usage_by_day_of_week_plot(activities_by_day: pd.Series) -> None:
+def save_usage_by_day_of_week_plot(
+    activities_by_day: pd.Series,
+    *,
+    scope_label: str = "Combined",
+    filename: str | None = None,
+    exclude_day_aggregate_note: bool = True,
+) -> None:
     if activities_by_day is None or activities_by_day.empty:
         return
+
+    if filename is None:
+        filename = build_scoped_plot_filename("usage_by_day_of_week", scope_label)
 
     day_order = [
         "Monday",
@@ -232,15 +260,24 @@ def save_usage_by_day_of_week_plot(activities_by_day: pd.Series) -> None:
     def plot() -> None:
         x = range(len(day_order))
         plt.bar(x, counts)
-        plt.title("Usage by Day of Week")
+        plt.title(f"{scope_label}: Usage by Day of Week")
         plt.xlabel("Day of Week")
         plt.ylabel("Number of Activities")
         plt.xticks(list(x), day_order, rotation=45, ha="right")
         plt.margins(x=0.01)
 
+        if exclude_day_aggregate_note:
+            plt.figtext(
+                0.5,
+                -0.04,
+                "Timing analysis excludes DAY_AGGREGATE where applicable.",
+                ha="center",
+                fontsize=9,
+            )
+
     create_and_save_figure(
         plot,
-        os.path.join(OUTPUT_VISUALIZATIONS_DIR, "usage_by_day_of_week.png"),
+        os.path.join(OUTPUT_VISUALIZATIONS_DIR, filename),
         figsize=(10, 6),
     )
 
@@ -932,9 +969,17 @@ def save_activity_type_by_day_heatmap_plot(activity_day_counts: pd.DataFrame) ->
     )
 
 
-def save_active_players_per_day_plot(active_users_per_day: pd.Series) -> None:
+def save_active_players_per_day_plot(
+    active_users_per_day: pd.Series,
+    *,
+    scope_label: str = "Combined",
+    filename: str | None = None,
+) -> None:
     if active_users_per_day is None or active_users_per_day.empty:
         return
+
+    if filename is None:
+        filename = build_scoped_plot_filename("active_players_per_day", scope_label)
 
     series = active_users_per_day.sort_index()
     date_labels = [pd.to_datetime(d).strftime("%Y-%m-%d") for d in series.index]
@@ -942,7 +987,7 @@ def save_active_players_per_day_plot(active_users_per_day: pd.Series) -> None:
     def plot() -> None:
         x_pos = range(len(series))
         plt.bar(x_pos, series.values, width=0.6)
-        plt.title("Number of Active Players per Day")
+        plt.title(f"{scope_label}: Active Players per Day")
         plt.xlabel("Date")
         plt.ylabel("Number of Active Players")
         ax = plt.gca()
@@ -953,7 +998,7 @@ def save_active_players_per_day_plot(active_users_per_day: pd.Series) -> None:
 
     create_and_save_figure(
         plot,
-        os.path.join(OUTPUT_VISUALIZATIONS_DIR, "active_players_per_day.png"),
+        os.path.join(OUTPUT_VISUALIZATIONS_DIR, filename),
         figsize=(12, 6),
     )
 
@@ -1151,13 +1196,26 @@ def save_geofence_3d_visualization_plot(filtered: pd.DataFrame) -> None:
 def save_active_passive_pie_chart(
     active_users_count: int,
     passive_users_count: int,
+    *,
+    scope_label: str = "Combined",
+    filename: str | None = None,
+    definition_note: str | None = None,
 ) -> None:
     total_users_considered = active_users_count + passive_users_count
     if total_users_considered <= 0:
         return
 
+    if filename is None:
+        filename = build_scoped_plot_filename("player_active_vs_passive_pie", scope_label)
+
     labels = [f"Active ({active_users_count})", f"Passive ({passive_users_count})"]
     sizes = [active_users_count, passive_users_count]
+
+    default_definition_note = (
+        "Active = enrolled users with at least one qualifying activity record; "
+        "Passive = enrolled users with none."
+    )
+    legend_note = definition_note or default_definition_note
 
     def plot() -> None:
         try:
@@ -1174,26 +1232,27 @@ def save_active_passive_pie_chart(
             startangle=90,
             wedgeprops={"edgecolor": "white"},
         )
-        plt.title("Active vs Passive Players (by rewards)")
+        plt.title(f"{scope_label}: Active vs Passive Users")
         plt.axis("equal")
 
         legend_labels = [
-            "Active: players with any rewarded activity",
-            "Passive: enrolled players with no rewards recorded",
+            "Active: enrolled users with ≥1 qualifying activity",
+            "Passive: enrolled users with no qualifying activity",
+            legend_note,
         ]
         plt.legend(
-            wedges,
+            wedges + [wedges[0]],
             legend_labels,
-            title="Legend",
+            title="Definition",
             loc="upper center",
-            bbox_to_anchor=(0.5, -0.12),
+            bbox_to_anchor=(0.5, -0.14),
             ncol=1,
             frameon=True,
         )
 
     create_and_save_figure(
         plot,
-        os.path.join(OUTPUT_VISUALIZATIONS_DIR, "player_active_vs_passive_pie.png"),
+        os.path.join(OUTPUT_VISUALIZATIONS_DIR, filename),
         figsize=(8, 6),
     )
 
@@ -1230,4 +1289,118 @@ def save_steps_trend_plot(total: pd.DataFrame) -> None:
         plot,
         os.path.join(OUTPUT_VISUALIZATIONS_DIR, "steps_trend.png"),
         figsize=PLOT_FIGSIZE_ACTIVITY_TYPES_STACKED,
+    )
+
+
+def save_usage_by_hour_buckets_plot(
+    usage_by_hour_buckets: pd.Series,
+    *,
+    scope_label: str = "Combined",
+    filename: str | None = None,
+    exclude_day_aggregate_note: bool = True,
+) -> None:
+    if usage_by_hour_buckets is None or usage_by_hour_buckets.empty:
+        return
+
+    if filename is None:
+        filename = build_scoped_plot_filename("usage_by_hour_buckets", scope_label)
+
+    series = usage_by_hour_buckets.copy()
+
+    def plot() -> None:
+        series.plot(kind="bar", colormap=BAR_COLORMAP)
+        plt.title(f"{scope_label}: Usage by Hour of Day Buckets")
+        plt.xlabel("Hour Bucket")
+        plt.ylabel("Number of Activities")
+        plt.xticks(rotation=45, ha="right")
+
+        if exclude_day_aggregate_note:
+            plt.figtext(
+                0.5,
+                -0.04,
+                "Timing analysis excludes DAY_AGGREGATE where applicable.",
+                ha="center",
+                fontsize=9,
+            )
+
+    create_and_save_figure(
+        plot,
+        os.path.join(OUTPUT_VISUALIZATIONS_DIR, filename),
+        figsize=(10, 6),
+    )
+
+def save_usage_by_hour_plot(
+    usage_by_hour: pd.Series,
+    *,
+    scope_label: str = "Combined",
+    filename: str | None = None,
+    exclude_day_aggregate_note: bool = True,
+) -> None:
+    if usage_by_hour is None or usage_by_hour.empty:
+        return
+
+    if filename is None:
+        filename = build_scoped_plot_filename("usage_by_hour", scope_label)
+
+    series = usage_by_hour.reindex(range(24), fill_value=0)
+
+    peak_hour = None
+    if not series.empty:
+        peak_hour = int(series.idxmax())
+
+    def plot() -> None:
+        plt.bar(series.index, series.values, width=0.8)
+        if peak_hour is not None:
+            plt.title(f"{scope_label}: Usage by Hour of Day (Peak: {peak_hour:02d}:00)")
+        else:
+            plt.title(f"{scope_label}: Usage by Hour of Day")
+        plt.xlabel("Hour of Day")
+        plt.ylabel("Number of Activities")
+        plt.xticks(range(24))
+        plt.xlim(-0.5, 23.5)
+        plt.margins(x=0.01)
+
+        if exclude_day_aggregate_note:
+            plt.figtext(
+                0.5,
+                -0.04,
+                "Timing analysis excludes DAY_AGGREGATE where applicable.",
+                ha="center",
+                fontsize=9,
+            )
+
+    create_and_save_figure(
+        plot,
+        os.path.join(OUTPUT_VISUALIZATIONS_DIR, filename),
+        figsize=(12, 6),
+    )
+
+
+def save_active_user_comparison_plot(
+    comparison_counts: pd.Series | dict,
+    *,
+    filename: str = "active_users_comparison.png",
+) -> None:
+    if comparison_counts is None:
+        return
+
+    if isinstance(comparison_counts, dict):
+        series = pd.Series(comparison_counts)
+    else:
+        series = comparison_counts.copy()
+
+    if series.empty:
+        return
+
+    def plot() -> None:
+        series.plot(kind="bar", colormap=BAR_COLORMAP)
+        plt.title("Active Users: Descriptor-Based vs Reward-Based")
+        plt.xlabel("Classification")
+        plt.ylabel("Number of Users")
+        plt.xticks(rotation=30, ha="right")
+
+    create_and_save_figure(
+        plot,
+        os.path.join(OUTPUT_VISUALIZATIONS_DIR, filename),
+        figsize=(12, 6),
     )

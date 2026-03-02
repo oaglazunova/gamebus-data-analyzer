@@ -109,8 +109,10 @@ def generate_descriptive_summary_text(
         return out_path
 
     df = activities.copy()
+    cm = campaign_metrics or {}
+    app_scope_metrics = cm.get("app_scope_metrics", {}) if isinstance(cm, dict) else {}
 
-    # Ensure datetime + derived fields
+    # Ensure datetime + derived fields for global interaction metrics
     if "createdAt" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["createdAt"]):
         df["createdAt"] = pd.to_datetime(df["createdAt"], errors="coerce", utc=True)
     if "date" not in df.columns and "createdAt" in df.columns:
@@ -118,24 +120,29 @@ def generate_descriptive_summary_text(
     if "hour" not in df.columns and "createdAt" in df.columns:
         df["hour"] = df["createdAt"].dt.hour
 
-    # Total participants: prefer aggregation sheet pid count if available
-    total_users = None
-    try:
-        agg_key = next((k for k in csv_data.keys() if isinstance(k, str) and k.lower() == "aggregation"), None)
-        if agg_key:
-            agg = csv_data[agg_key]
-            if isinstance(agg, pd.DataFrame) and not agg.empty:
-                pid_col = next((c for c in agg.columns if isinstance(c, str) and c.lower() == "pid"), None)
-                if pid_col:
-                    total_users = int(pd.Series(agg[pid_col]).nunique())
-    except Exception:
-        total_users = None
+    # ------------------------------------------------------------------
+    # Enrolled users count (prefer campaign_metrics, fallback to aggregation)
+    # ------------------------------------------------------------------
+    total_users = cm.get("enrolled_users_count", None)
 
-    users_in_activities = int(df["pid"].nunique()) if "pid" in df.columns else 0
-    if total_users is None or total_users <= 0:
-        total_users = users_in_activities
+    if not isinstance(total_users, int) or total_users <= 0:
+        try:
+            agg_key = next((k for k in csv_data.keys() if isinstance(k, str) and k.lower() == "aggregation"), None)
+            if agg_key:
+                agg = csv_data[agg_key]
+                if isinstance(agg, pd.DataFrame) and not agg.empty:
+                    pid_col = next((c for c in agg.columns if isinstance(c, str) and c.lower() == "pid"), None)
+                    if pid_col:
+                        total_users = int(pd.Series(agg[pid_col]).nunique())
+        except Exception:
+            total_users = None
 
-    # Points/rewards fields
+    if not isinstance(total_users, int) or total_users <= 0:
+        total_users = int(df["pid"].nunique()) if "pid" in df.columns else 0
+
+    # ------------------------------------------------------------------
+    # Ensure points / rewards for global interaction metrics
+    # ------------------------------------------------------------------
     if "points" not in df.columns and "rewardedParticipations" in df.columns:
         df["points"] = df["rewardedParticipations"].apply(extract_points)
 
@@ -145,38 +152,64 @@ def generate_descriptive_summary_text(
         else:
             df["num_rewards"] = 0
 
-    per_user = df.groupby("pid", dropna=True).agg(
-        total_points=("points", "sum"),
-        total_rewards=("num_rewards", "sum"),
-        active_days=("date", lambda s: pd.Series(s).dropna().nunique()),
-    ).reset_index()
+    # ------------------------------------------------------------------
+    # Helper formatters
+    # ------------------------------------------------------------------
+    def _as_series(obj) -> pd.Series:
+        if isinstance(obj, pd.Series):
+            return obj.copy()
+        if isinstance(obj, dict):
+            try:
+                return pd.Series(obj)
+            except Exception:
+                return pd.Series(dtype=float)
+        return pd.Series(dtype=float)
 
-    active_users = per_user[(per_user["total_points"] > 0) | (per_user["total_rewards"] > 0)]
-    active_n = int(active_users["pid"].nunique())
-    passive_n = max(0, int(total_users) - active_n)
+    def _series_pct_lines(series_obj, ordered_labels: Optional[List[str]] = None) -> List[str]:
+        s = _as_series(series_obj)
+        if s.empty:
+            return ["  - N/A"]
 
-    # Active players per day
-    apd_mean, apd_sd = (None, None)
-    if "pid" in df.columns and "date" in df.columns:
-        active_players_per_day = df.dropna(subset=["pid", "date"]).groupby("date")["pid"].nunique()
-        if not active_players_per_day.empty:
-            apd_mean, apd_sd = _mean_sd(active_players_per_day)
+        try:
+            s = pd.to_numeric(s, errors="coerce").fillna(0)
+        except Exception:
+            pass
 
-    # Average active days per participant
-    aad_mean, aad_sd = _mean_sd(per_user["active_days"])
+        if ordered_labels:
+            s = s.reindex(ordered_labels).fillna(0)
 
-    # Retention proxy
-    retention_mean, retention_sd = (None, None)
-    try:
-        user_dropout = df.groupby("pid").agg(first=("createdAt", "min"), last=("createdAt", "max")).dropna()
-        user_dropout["retention_days"] = (user_dropout["last"] - user_dropout["first"]).dt.days
-        retention_mean, retention_sd = _mean_sd(user_dropout["retention_days"])
-    except Exception:
-        pass
+        total = float(s.sum()) if not s.empty else 0.0
+        lines_local: List[str] = []
 
-    # Retention rate per week (wave)
+        for idx, val in s.items():
+            n = float(val) if pd.notna(val) else 0.0
+            if total > 0:
+                pct = n / total * 100.0
+            else:
+                pct = 0.0
+
+            if abs(n - round(n)) < 1e-9:
+                n_text = str(int(round(n)))
+            else:
+                n_text = f"{n:.2f}"
+
+            lines_local.append(f"  - {idx}: {n_text} ({pct:.1f}%)")
+
+        return lines_local if lines_local else ["  - N/A"]
+
+    def _fmt_peak_hour(val) -> str:
+        try:
+            if val is None or pd.isna(val):
+                return "N/A"
+            return f"{int(val):02d}:00"
+        except Exception:
+            return "N/A"
+
+    # ------------------------------------------------------------------
+    # Optional global retention-by-wave section (kept from old summary)
+    # ------------------------------------------------------------------
     retention_by_wave_lines: List[str] = []
-    if "wave" in df.columns and "pid" in df.columns:
+    if "wave" in df.columns and "pid" in df.columns and total_users > 0:
         try:
             wave_active = df.dropna(subset=["pid", "wave"]).groupby("wave")["pid"].nunique().sort_index()
             for w, n in wave_active.items():
@@ -186,74 +219,35 @@ def generate_descriptive_summary_text(
         except Exception:
             pass
 
-    # Usage by day of week
-    dow_lines: List[str] = []
-    if "date" in df.columns:
-        try:
-            dow = pd.to_datetime(df["date"], errors="coerce").dt.day_name()
-            dow_counts = dow.value_counts()
-            day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-            dow_counts = dow_counts.reindex(day_order).fillna(0).astype(int)
-            total_acts = int(dow_counts.sum())
-            for day in day_order:
-                n = int(dow_counts.loc[day])
-                dow_lines.append(f"  - {day}: {n} ({_fmt_pct(n, total_acts)})")
-        except Exception:
-            pass
-
-    # Usage by hour buckets (FIXED LABELS)
-    hour_bucket_lines: List[str] = []
-    peak_hour_line = "N/A"
-    if "hour" in df.columns:
-        try:
-            hours = pd.to_numeric(df["hour"], errors="coerce").dropna().astype(int)
-            if not hours.empty:
-                peak_hour = int(hours.value_counts().idxmax())
-                peak_hour_line = f"{peak_hour:02d}:00"
-
-                buckets = hours.apply(_bucket_hour).value_counts()
-                bucket_order = [
-                    "morning (6AM-11AM)",
-                    "afternoon (12PM-5PM)",
-                    "evening (6PM-11PM)",
-                    "night (12AM-5AM)",
-                ]
-                buckets = buckets.reindex(bucket_order).fillna(0).astype(int)
-                total = int(buckets.sum())
-                for b in bucket_order:
-                    n = int(buckets.loc[b])
-                    hour_bucket_lines.append(f"  - {b}: {n} ({_fmt_pct(n, total)})")
-        except Exception:
-            pass
-
-    # Activities distribution
+    # ------------------------------------------------------------------
+    # Global interaction metrics (unchanged logic)
+    # ------------------------------------------------------------------
     type_lines: List[str] = []
     if "type" in df.columns:
         type_counts = df["type"].astype(str).value_counts()
-        total = int(type_counts.sum())
+        total = int(type_counts.sum()) if not type_counts.empty else 0
         for t, n in type_counts.items():
             type_lines.append(f"  - {t}: {int(n)} ({_fmt_pct(int(n), total)})")
 
-    # Activities per player mean/sd
     acts_per_player = df.groupby("pid").size() if "pid" in df.columns else pd.Series(dtype=float)
     acts_pp_mean, acts_pp_sd = _mean_sd(acts_per_player)
 
-    # Points per player mean/sd
     points_per_player = (
-        df.groupby("pid")["points"].sum() if ("pid" in df.columns and "points" in df.columns) else pd.Series(dtype=float)
+        df.groupby("pid")["points"].sum()
+        if ("pid" in df.columns and "points" in df.columns)
+        else pd.Series(dtype=float)
     )
     ppp_mean, ppp_sd = _mean_sd(points_per_player)
 
-    # Points by activity type
     points_by_type_lines: List[str] = []
     if "type" in df.columns and "points" in df.columns:
         pbt = df.groupby("type")["points"].sum().sort_values(ascending=False)
-        total = float(pbt.sum()) if not pbt.empty else 0.0
+        total_points = float(pbt.sum()) if not pbt.empty else 0.0
         for t, pts in pbt.items():
-            pct = (float(pts) / total * 100.0) if total > 0 else 0.0
+            pct = (float(pts) / total_points * 100.0) if total_points > 0 else 0.0
             points_by_type_lines.append(f"  - {t}: {float(pts):.0f} points ({pct:.1f}%)")
 
-    # Tasks by provider (if desc_tasks exists)
+    # Tasks by provider (unchanged logic)
     provider_lines: List[str] = []
     try:
         if "desc_tasks" in csv_data and isinstance(csv_data["desc_tasks"], pd.DataFrame) and not csv_data["desc_tasks"].empty:
@@ -267,7 +261,9 @@ def generate_descriptive_summary_text(
                 tmp["detailed_rewards"] = tmp["rewardedParticipations"].apply(extract_detailed_rewards)
                 tmp = tmp.explode("detailed_rewards").dropna(subset=["detailed_rewards"])
                 tmp = tmp[tmp["detailed_rewards"].apply(lambda x: isinstance(x, dict))]
-                tmp["task_name"] = tmp["detailed_rewards"].apply(lambda r: str(r.get("rule")).strip() if r.get("rule") is not None else None)
+                tmp["task_name"] = tmp["detailed_rewards"].apply(
+                    lambda r: str(r.get("rule")).strip() if r.get("rule") is not None else None
+                )
                 tmp = tmp.dropna(subset=["task_name"])
 
                 def _norm(s: str) -> str:
@@ -300,35 +296,105 @@ def generate_descriptive_summary_text(
 
                 if not mapped.empty:
                     counts = mapped.groupby("provider").size().sort_values(ascending=False)
-                    total = int(counts.sum())
+                    total_provider = int(counts.sum()) if not counts.empty else 0
                     for prov, n in counts.items():
-                        provider_lines.append(f"  - {prov}: {int(n)} ({_fmt_pct(int(n), total)})")
+                        provider_lines.append(f"  - {prov}: {int(n)} ({_fmt_pct(int(n), total_provider)})")
     except Exception:
         pass
 
+    # ------------------------------------------------------------------
     # Compose text
+    # ------------------------------------------------------------------
     lines: List[str] = []
     lines.append("USAGE METRICS")
     lines.append("=============")
-    lines.append("Participating users (completing activities):")
-    lines.append(f"  - Active users: {active_n}/{int(total_users)} ({_fmt_pct(active_n, int(total_users))})")
-    lines.append(f"  - Passive users: {passive_n}/{int(total_users)} ({_fmt_pct(passive_n, int(total_users))})")
+    lines.append(f"Total enrolled participants: {int(total_users)}")
     lines.append("")
-    lines.append(f"Average active days / participant: {_fmt_mean_sd(aad_mean, aad_sd)} days")
-    lines.append(f"Active players per day: {_fmt_mean_sd(apd_mean, apd_sd)} players/day")
-    lines.append(f"Average time to first inactivity (proxy = last-first activity): {_fmt_mean_sd(retention_mean, retention_sd)} days")
+    lines.append("Active/passive user definitions:")
+    lines.append(
+        "  - GameBus active = has at least one of: DRINKING_DIARY, GENERAL_ACTIVITY, "
+        "NUTRITION_DIARY, PHYSICAL_ACTIVITY, WALK, BIKE."
+    )
+    lines.append("  - GameBus passive = enrolled, but has none of the GameBus activity types above.")
+    lines.append("  - Nutrida active = has at least one of: PLAN_MEAL, NUTRITION_DIARY_VID.")
+    lines.append("  - Nutrida passive = enrolled, but has none of the Nutrida activity types above.")
+    lines.append(
+        "  - Combined active = has at least one GameBus-or-Nutrida qualifying activity."
+    )
+    lines.append(
+        "  - Combined passive = enrolled, but has none of those qualifying activities in either app."
+    )
     lines.append("")
+    lines.append("Timing-analysis note:")
+    lines.append(
+        "  - Usage time / day of week, usage time / hour buckets, and peak activity hour "
+        "exclude DAY_AGGREGATE where applicable."
+    )
+    lines.append(
+        "  - Average active days / participant, active players per day, and average time to first inactivity "
+        "do not exclude DAY_AGGREGATE for GameBus / Combined."
+    )
+    lines.append("")
+
+    # Legacy comparison
+    legacy_active = cm.get("reward_based_active_users_count", None)
+    legacy_passive = cm.get("reward_based_passive_users_count", None)
+    if legacy_active is not None and legacy_passive is not None:
+        lines.append("Legacy comparison (current reward-based method):")
+        lines.append(f"  - Reward-based active users: {int(legacy_active)}/{int(total_users)} ({_fmt_pct(int(legacy_active), int(total_users))})")
+        lines.append(f"  - Reward-based passive users: {int(legacy_passive)}/{int(total_users)} ({_fmt_pct(int(legacy_passive), int(total_users))})")
+        lines.append("")
+
+    # Per-scope sections
+    scope_order = ["gamebus", "nutrida", "combined"]
+    day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    hour_bucket_order = ["00:00-05:59", "06:00-11:59", "12:00-17:59", "18:00-23:59"]
+
+    for scope_key in scope_order:
+        scope = app_scope_metrics.get(scope_key)
+        if not isinstance(scope, dict):
+            continue
+
+        label = scope.get("label", scope_key.title())
+        active_n = int(scope.get("active_users_count", 0))
+        passive_n = int(scope.get("passive_users_count", 0))
+
+        lines.append(f"{label}")
+        lines.append("-" * len(label))
+        lines.append(f"  - Active users: {active_n}/{int(total_users)} ({_fmt_pct(active_n, int(total_users))})")
+        lines.append(f"  - Passive users: {passive_n}/{int(total_users)} ({_fmt_pct(passive_n, int(total_users))})")
+        lines.append("")
+        lines.append(
+            f"  - Average active days / participant: "
+            f"{scope.get('avg_active_days_per_participant', 0.0):.2f} days "
+            f"(median {scope.get('median_active_days_per_participant', 0.0):.2f})"
+        )
+        lines.append(
+            f"  - Active players per day: "
+            f"{scope.get('avg_active_players_per_day', 0.0):.2f} players/day "
+            f"(median {scope.get('median_active_players_per_day', 0.0):.2f})"
+        )
+        lines.append(
+            f"  - Average time to first inactivity "
+            f"(proxy = last-first activity): "
+            f"{scope.get('avg_time_to_first_inactivity_days', 0.0):.2f} days "
+            f"(median {scope.get('median_time_to_first_inactivity_days', 0.0):.2f})"
+        )
+        lines.append("")
+        lines.append("  Usage time / day of week (% of scoped activities):")
+        lines.extend(_series_pct_lines(scope.get("usage_by_day_of_week_series"), ordered_labels=day_order))
+        lines.append("")
+        lines.append("  Usage time / hour of day buckets (% of scoped activities):")
+        lines.extend(_series_pct_lines(scope.get("usage_by_hour_buckets_series"), ordered_labels=hour_bucket_order))
+        lines.append("")
+        lines.append(f"  Peak activity hour: {_fmt_peak_hour(scope.get('peak_activity_hour'))}")
+        lines.append("")
+
+    # Keep the old wave-retention block as a supplemental global section
     lines.append("Retention rate / week (% active users among all participants):")
     lines.extend(retention_by_wave_lines if retention_by_wave_lines else ["  - N/A"])
     lines.append("")
-    lines.append("Usage time / day of week (% of activities):")
-    lines.extend(dow_lines if dow_lines else ["  - N/A"])
-    lines.append("")
-    lines.append("Usage time / hour of day buckets (% of activities):")
-    lines.extend(hour_bucket_lines if hour_bucket_lines else ["  - N/A"])
-    lines.append("")
-    lines.append(f"Peak activity hour: {peak_hour_line}")
-    lines.append("")
+
     lines.append("INTERACTION METRICS")
     lines.append("===================")
     lines.append("Activities distribution (% per type):")
@@ -367,6 +433,9 @@ def generate_analysis_report(
     data_analysis_dir = ensure_dir(os.path.join(PROJECT_ROOT, "data_analysis"))
     report_path = os.path.join(data_analysis_dir, "analysis_report.txt")
 
+    cm = campaign_metrics or {}
+    app_scope_metrics = cm.get("app_scope_metrics", {}) if isinstance(cm, dict) else {}
+
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("GameBus Data Analysis Report\n")
         f.write("===========================\n\n")
@@ -385,7 +454,6 @@ def generate_analysis_report(
 
         f.write("\n2. Campaign Summary\n")
         f.write("------------------\n")
-        cm = campaign_metrics or {}
         name = cm.get("name", "GameBus Campaign")
         abbr = cm.get("abbreviation", "")
         start_date = cm.get("start_date", "Unknown")
@@ -398,31 +466,73 @@ def generate_analysis_report(
         f.write(f"End Date: {end_date}\n")
         f.write(f"Length: {length_days} days\n")
 
-        # total players from aggregation sheet if possible
-        agg_total_users = None
-        try:
-            agg_key = next((k for k in csv_data.keys() if isinstance(k, str) and k.lower() == "aggregation"), None)
-            if agg_key:
-                df_agg = csv_data[agg_key]
-                if isinstance(df_agg, pd.DataFrame) and not df_agg.empty:
-                    pid_col = next((c for c in df_agg.columns if isinstance(c, str) and c.lower() == "pid"), None)
-                    if pid_col:
-                        agg_total_users = int(pd.Series(df_agg[pid_col]).nunique())
-        except Exception:
-            pass
+        # total players from campaign_metrics first; fallback to aggregation; fallback to unique_users
+        total_users_for_report = cm.get("enrolled_users_count", None)
 
-        total_users_for_report = agg_total_users if isinstance(agg_total_users, int) and agg_total_users > 0 else unique_users
+        if not isinstance(total_users_for_report, int) or total_users_for_report <= 0:
+            agg_total_users = None
+            try:
+                agg_key = next((k for k in csv_data.keys() if isinstance(k, str) and k.lower() == "aggregation"), None)
+                if agg_key:
+                    df_agg = csv_data[agg_key]
+                    if isinstance(df_agg, pd.DataFrame) and not df_agg.empty:
+                        pid_col = next((c for c in df_agg.columns if isinstance(c, str) and c.lower() == "pid"), None)
+                        if pid_col:
+                            agg_total_users = int(pd.Series(df_agg[pid_col]).nunique())
+            except Exception:
+                pass
+
+            total_users_for_report = agg_total_users if isinstance(agg_total_users, int) and agg_total_users > 0 else unique_users
+
         f.write(f"Total number of Players in the Campaign: {total_users_for_report}\n")
 
+        # Top-level active/passive now means Combined descriptor-based
         active_users_count = cm.get("active_users_count", None)
         passive_users_count = cm.get("passive_users_count", None)
         if active_users_count is not None and passive_users_count is not None:
-            f.write(f"Active Players (rewarded): {active_users_count}\n")
-            f.write(f"Passive Players (enrolled, never rewarded): {passive_users_count}\n")
+            f.write(f"Active Players (combined, descriptor-based): {active_users_count}\n")
+            f.write(f"Passive Players (combined, descriptor-based): {passive_users_count}\n")
             passive_ids = cm.get("passive_user_ids", [])
             if isinstance(passive_ids, list) and passive_ids:
                 preview = ", ".join(map(str, passive_ids[:10]))
-                f.write(f"Passive Player IDs (first 10): {preview}\n")
+                f.write(f"Combined passive Player IDs (first 10): {preview}\n")
+
+        legacy_active = cm.get("reward_based_active_users_count", None)
+        legacy_passive = cm.get("reward_based_passive_users_count", None)
+        if legacy_active is not None and legacy_passive is not None:
+            f.write(f"Active Players (legacy reward-based): {legacy_active}\n")
+            f.write(f"Passive Players (legacy reward-based): {legacy_passive}\n")
+
+        f.write("\nActive/passive definitions:\n")
+        f.write("  - GameBus active = has >=1 of: DRINKING_DIARY, GENERAL_ACTIVITY, NUTRITION_DIARY, PHYSICAL_ACTIVITY, WALK, BIKE\n")
+        f.write("  - GameBus passive = enrolled, but has none of those GameBus activities\n")
+        f.write("  - Nutrida active = has >=1 of: PLAN_MEAL, NUTRITION_DIARY_VID\n")
+        f.write("  - Nutrida passive = enrolled, but has none of those Nutrida activities\n")
+        f.write("  - Combined active = has >=1 qualifying GameBus-or-Nutrida activity\n")
+        f.write("  - Combined passive = enrolled, but has none of those qualifying activities in either app\n")
+
+        if app_scope_metrics:
+            f.write("\nPer-scope usage summary:\n")
+            for scope_key in ["gamebus", "nutrida", "combined"]:
+                scope = app_scope_metrics.get(scope_key)
+                if not isinstance(scope, dict):
+                    continue
+
+                label = scope.get("label", scope_key.title())
+                f.write(f"  {label}:\n")
+                f.write(f"    - Active users: {int(scope.get('active_users_count', 0))}\n")
+                f.write(f"    - Passive users: {int(scope.get('passive_users_count', 0))}\n")
+                f.write(f"    - Avg active days / participant: {float(scope.get('avg_active_days_per_participant', 0.0)):.2f}\n")
+                f.write(f"    - Avg active players / day: {float(scope.get('avg_active_players_per_day', 0.0)):.2f}\n")
+                f.write(
+                    f"    - Avg time to first inactivity "
+                    f"(proxy=last-first): {float(scope.get('avg_time_to_first_inactivity_days', 0.0)):.2f}\n"
+                )
+                peak_hour = scope.get("peak_activity_hour", None)
+                if peak_hour is None or (isinstance(peak_hour, float) and pd.isna(peak_hour)):
+                    f.write("    - Peak activity hour: N/A\n")
+                else:
+                    f.write(f"    - Peak activity hour: {int(peak_hour):02d}:00\n")
 
         f.write("\n3. Dropout Metrics\n")
         f.write("-----------------\n")
@@ -465,5 +575,11 @@ def create_complete_report(
     else:
         acts = activities_result if isinstance(activities_result, pd.DataFrame) else None
 
-    return generate_analysis_report(csv_data, json_data, acts, campaign_metrics, dropout_metrics, joining_metrics)
-
+    return generate_analysis_report(
+        csv_data,
+        json_data,
+        acts,
+        campaign_metrics,
+        dropout_metrics,
+        joining_metrics,
+    )

@@ -48,6 +48,26 @@ MAX_DAYS_HEATMAP = 60
 MAX_TYPES_HEATMAP = 15
 
 
+WEEKDAY_ORDER = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+]
+
+HOUR_BUCKET_LABELS = [
+    "00:00-05:59",
+    "06:00-11:59",
+    "12:00-17:59",
+    "18:00-23:59",
+]
+
+HOUR_BUCKET_BINS = [-1, 5, 11, 17, 23]
+
+
 # -----------------------------------------------------------------------------
 # Logging
 # -----------------------------------------------------------------------------
@@ -78,6 +98,28 @@ def safe_filename(text: Optional[str], max_len: int = 120) -> str:
     s = re.sub(r"[^A-Za-z0-9._-]", "", s)
     return (s or "unknown")[:max_len]
 
+
+
+def build_scoped_plot_filename(base_name: str, scope_label: Optional[str], ext: str = ".png") -> str:
+    """
+    Build a scope-specific filename so per-scope plots do not overwrite each other.
+
+    Examples:
+    - build_scoped_plot_filename("usage_by_day_of_week", "GameBus")
+      -> "usage_by_day_of_week_gamebus.png"
+    - build_scoped_plot_filename("active_players_per_day", "Combined")
+      -> "active_players_per_day_combined.png"
+    """
+    base_root, base_ext = os.path.splitext(base_name)
+    if base_ext:
+        ext = base_ext
+    if not ext.startswith("."):
+        ext = f".{ext}"
+
+    scope_slug = safe_filename(str(scope_label).strip().lower() if scope_label else "combined")
+    base_slug = safe_filename(base_root or base_name)
+
+    return f"{base_slug}_{scope_slug}{ext}"
 
 # -------------------
 # Plotting helpers
@@ -152,6 +194,7 @@ def create_and_save_figure(
     plot_function: Callable[[], None],
     filename: str,
     figsize: Tuple[float, float] = (10, 6),
+    bottom_adjust: Optional[float] = None,
 ) -> None:
     output_dir = os.path.dirname(filename)
     if output_dir:
@@ -167,6 +210,12 @@ def create_and_save_figure(
         pass
 
     _apply_label_truncation(fig, LABEL_MAX_CHARS)
+
+    try:
+        if bottom_adjust is not None:
+            fig.subplots_adjust(bottom=bottom_adjust)
+    except Exception:
+        pass
 
     try:
         fig.tight_layout()
@@ -211,10 +260,15 @@ def _fmt_pct(n: int, d: int, digits: int = 1) -> str:
 
 
 def _bucket_hour(h: int) -> str:
-    if 6 <= h <= 11:
-        return "morning (6AM-11AM)"
-    if 12 <= h <= 17:
-        return "afternoon (12PM-5PM)"
-    if 18 <= h <= 23:
-        return "evening (6PM-11PM)"
-    return "night (12AM-5AM)"
+    try:
+        hour = int(h)
+    except Exception:
+        return HOUR_BUCKET_LABELS[0]
+
+    if 6 <= hour <= 11:
+        return HOUR_BUCKET_LABELS[1]
+    if 12 <= hour <= 17:
+        return HOUR_BUCKET_LABELS[2]
+    if 18 <= hour <= 23:
+        return HOUR_BUCKET_LABELS[3]
+    return HOUR_BUCKET_LABELS[0]

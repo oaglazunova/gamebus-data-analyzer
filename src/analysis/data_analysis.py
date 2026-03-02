@@ -6,16 +6,22 @@ from typing import Tuple, Dict, Optional, Union, List
 import pandas as pd
 import logging
 
-from src.analysis.common import OUTPUT_VISUALIZATIONS_DIR, MAX_TYPES_HEATMAP, ensure_output_dirs, logger
+from src.analysis.common import OUTPUT_VISUALIZATIONS_DIR, MAX_TYPES_HEATMAP, ensure_output_dirs, logger, WEEKDAY_ORDER
 from src.analysis.loaders import extract_detailed_rewards, load_excel_files, load_json_files
 from src.analysis.reporting import generate_descriptive_stats, generate_descriptive_summary_text, create_complete_report
 from src.analysis.activity_metrics import (
+    APP_SCOPES,
     build_activities_frame,
     normalize_activity_columns,
     assign_campaign_wave,
     compute_campaign_metrics,
     compute_dropout_metrics,
     compute_joining_metrics,
+    get_enrolled_user_ids,
+    compute_reward_based_active_user_ids,
+    compute_active_passive_by_types,
+    compute_scope_usage_metrics,
+    filter_activities_by_types,
 )
 from src.analysis.activity_plots import (
     save_activity_types_distribution_plot,
@@ -40,9 +46,12 @@ from src.analysis.activity_plots import (
     save_active_players_per_day_plot, save_tasks_by_provider_plot, save_tasks_completed_per_day_plot,
     save_tasks_completed_per_player_plot, save_geofence_hourly_activity_plot, save_geofence_speed_by_hour_plot,
     save_geofence_movement_trajectory_plot, save_geofence_3d_visualization_plot, save_active_passive_pie_chart,
-    save_steps_trend_plot
+    save_steps_trend_plot, save_usage_by_hour_buckets_plot,
+    save_usage_by_hour_plot,
+    save_active_user_comparison_plot,
 )
 from src.utils.logging import setup_logging, console_info, console_error
+from src.analysis.geofence_analysis import analyze_geofence_data
 
 # -----------------------------------------------------------------------------
 # Activities analysis (core)
@@ -50,7 +59,6 @@ from src.utils.logging import setup_logging, console_info, console_error
 def analyze_activities(
     csv_data: Dict[str, pd.DataFrame],
 ) -> Optional[Tuple[pd.DataFrame, int, Optional[Dict], Optional[Dict], Optional[Dict]]]:
-
     try:
         activities = build_activities_frame(csv_data)
         activities = normalize_activity_columns(activities)
@@ -59,47 +67,191 @@ def analyze_activities(
         logger.error(f"Error processing activities data: {e}")
         return None
 
-    # Active/passive classification by rewards
-    active_user_ids: set = set()
-    passive_user_ids: List = []
-    active_users_count = 0
-    passive_users_count = 0
+    # ------------------------------------------------------------------
+    # Enrolled users base + reward-based active users (legacy comparison)
+    # ------------------------------------------------------------------
+    enrolled_user_ids: set = set()
+    reward_based_active_user_ids: set = set()
+    reward_based_passive_user_ids: List = []
+    reward_based_active_users_count = 0
+    reward_based_passive_users_count = 0
+
+    # Per-scope metrics (GameBus / Nutrida / Combined)
+    app_scope_metrics: Dict[str, Dict] = {}
 
     try:
-        per_user = activities.groupby("pid").agg(
-            total_rewards=("num_rewards", "sum"),
-            total_points=("points", "sum"),
-        ).reset_index()
+        enrolled_user_ids = get_enrolled_user_ids(csv_data, activities)
 
-        active_user_ids = set(per_user[(per_user["total_rewards"] > 0) | (per_user["total_points"] > 0)]["pid"].tolist())
+        reward_based_active_user_ids = compute_reward_based_active_user_ids(activities)
+        reward_based_passive_user_ids = sorted(list(enrolled_user_ids - reward_based_active_user_ids))
+        reward_based_active_users_count = len(reward_based_active_user_ids)
+        reward_based_passive_users_count = len(reward_based_passive_user_ids)
 
-        # Enrolled users: prefer aggregation sheet pid; otherwise union of any pid-like columns; fallback to activities
-        enrolled_user_ids: set = set()
-        for key, df in csv_data.items():
-            if not isinstance(df, pd.DataFrame) or df.empty:
-                continue
-            try:
-                cols_map = {c.lower(): c for c in df.columns}
-                pid_col = cols_map.get("pid") or cols_map.get("playerid")
-                if pid_col and pid_col in df.columns:
-                    enrolled_user_ids.update(pd.Series(df[pid_col]).dropna().unique().tolist())
-            except Exception:
-                pass
-        if not enrolled_user_ids:
-            enrolled_user_ids = set(activities["pid"].dropna().unique().tolist())
-
-        passive_user_ids = sorted(list(enrolled_user_ids - active_user_ids))
-        active_users_count = len(active_user_ids)
-        passive_users_count = len(passive_user_ids)
-
-        engagement_map = {pid: ("Active" if pid in active_user_ids else "Passive") for pid in activities["pid"].dropna().unique()}
-        activities["engagement_by_rewards"] = activities["pid"].map(engagement_map)
-
-        # Pie chart
-        save_active_passive_pie_chart(active_users_count, passive_users_count)
+        # Keep the old reward-based engagement label for backward compatibility
+        reward_engagement_map = {
+            pid: ("Active" if pid in reward_based_active_user_ids else "Passive")
+            for pid in activities["pid"].dropna().unique()
+        }
+        activities["engagement_by_rewards"] = activities["pid"].map(reward_engagement_map)
 
     except Exception as e:
-        logger.error(f"Error classifying active/passive users: {e}")
+        logger.error(f"Error computing enrolled/reward-based user metrics: {e}")
+
+    # ------------------------------------------------------------------
+    # Descriptor-based scope analysis
+    # ------------------------------------------------------------------
+    def _definition_note(scope_key: str) -> str:
+        if scope_key == "gamebus":
+            return (
+                "GameBus active = >=1 of: DRINKING_DIARY, GENERAL_ACTIVITY, "
+                "NUTRITION_DIARY, PHYSICAL_ACTIVITY, WALK, BIKE. "
+                "Passive = enrolled but none of these."
+            )
+        if scope_key == "nutrida":
+            return (
+                "Nutrida active = >=1 of: PLAN_MEAL, NUTRITION_DIARY_VID. "
+                "Passive = enrolled but none of these."
+            )
+        return (
+            "Combined active = >=1 of the GameBus or Nutrida qualifying activities. "
+            "Passive = enrolled but none in either app."
+        )
+
+    try:
+        descriptor_active_counts_for_comparison: Dict[str, int] = {}
+
+        for scope_key, scope_cfg in APP_SCOPES.items():
+            scope_label = scope_cfg["label"]
+
+            try:
+                # Active/passive by descriptor list (new main method)
+                active_passive = compute_active_passive_by_types(
+                    activities=activities,
+                    enrolled_user_ids=enrolled_user_ids,
+                    active_types=scope_cfg["active_types"],
+                )
+
+                # Scope usage metrics
+                usage_metrics = compute_scope_usage_metrics(
+                    activities=activities,
+                    enrolled_user_ids=enrolled_user_ids,
+                    metric_types=scope_cfg["metric_types"],
+                    usage_time_types=scope_cfg["usage_time_types"],
+                )
+
+                descriptor_active_counts_for_comparison[f"{scope_label} (descriptor-based)"] = (
+                    active_passive["active_users_count"]
+                )
+
+                # Scope-specific plots
+                try:
+                    save_active_passive_pie_chart(
+                        active_passive["active_users_count"],
+                        active_passive["passive_users_count"],
+                        scope_label=scope_label,
+                        definition_note=_definition_note(scope_key),
+                    )
+                except Exception as e:
+                    logger.error(f"Error plotting active/passive pie for {scope_label}: {e}")
+
+                try:
+                    save_usage_by_day_of_week_plot(
+                        usage_metrics["usage_by_day_of_week"],
+                        scope_label=scope_label,
+                    )
+                except Exception as e:
+                    logger.error(f"Error plotting usage by day of week for {scope_label}: {e}")
+
+                try:
+                    save_usage_by_hour_buckets_plot(
+                        usage_metrics["usage_by_hour_buckets"],
+                        scope_label=scope_label,
+                    )
+                except Exception as e:
+                    logger.error(f"Error plotting usage by hour buckets for {scope_label}: {e}")
+
+                try:
+                    save_usage_by_hour_plot(
+                        usage_metrics["usage_by_hour"],
+                        scope_label=scope_label,
+                    )
+                except Exception as e:
+                    logger.error(f"Error plotting usage by hour for {scope_label}: {e}")
+
+                try:
+                    save_active_players_per_day_plot(
+                        usage_metrics["active_players_per_day"],
+                        scope_label=scope_label,
+                    )
+                except Exception as e:
+                    logger.error(f"Error plotting active players per day for {scope_label}: {e}")
+
+                # Heatmap: day-of-week x hour (timing analysis uses usage_time_types only)
+                try:
+                    usage_df = activities[activities["type"].isin(scope_cfg["usage_time_types"])].copy()
+                    if not usage_df.empty:
+                        usage_df["day_of_week"] = usage_df["createdAt"].dt.day_name()
+
+                        activity_heatmap_data = pd.crosstab(
+                            index=usage_df["day_of_week"],
+                            columns=usage_df["hour"],
+                        ).fillna(0)
+
+                        activity_heatmap_data = activity_heatmap_data.reindex(WEEKDAY_ORDER).fillna(0)
+                        activity_heatmap_data = activity_heatmap_data.reindex(columns=range(24), fill_value=0)
+
+                        save_activity_heatmap_by_time_plot(
+                            activity_heatmap_data,
+                            scope_label=scope_label,
+                        )
+                except Exception as e:
+                    logger.error(f"Error creating activity heatmap by time for {scope_label}: {e}")
+
+                # Store for report
+                app_scope_metrics[scope_key] = {
+                    "label": scope_label,
+                    "active_users_count": active_passive["active_users_count"],
+                    "passive_users_count": active_passive["passive_users_count"],
+                    "active_user_ids": sorted(list(active_passive["active_user_ids"])),
+                    "passive_user_ids": sorted(list(active_passive["passive_user_ids"])),
+
+                    "avg_active_days_per_participant": usage_metrics["avg_active_days_per_participant"],
+                    "median_active_days_per_participant": usage_metrics["median_active_days_per_participant"],
+                    "min_active_days_per_participant": usage_metrics["min_active_days_per_participant"],
+                    "max_active_days_per_participant": usage_metrics["max_active_days_per_participant"],
+
+                    "avg_active_players_per_day": usage_metrics["avg_active_players_per_day"],
+                    "median_active_players_per_day": usage_metrics["median_active_players_per_day"],
+                    "min_active_players_per_day": usage_metrics["min_active_players_per_day"],
+                    "max_active_players_per_day": usage_metrics["max_active_players_per_day"],
+
+                    "avg_time_to_first_inactivity_days": usage_metrics["avg_time_to_first_inactivity_days"],
+                    "median_time_to_first_inactivity_days": usage_metrics["median_time_to_first_inactivity_days"],
+                    "min_time_to_first_inactivity_days": usage_metrics["min_time_to_first_inactivity_days"],
+                    "max_time_to_first_inactivity_days": usage_metrics["max_time_to_first_inactivity_days"],
+
+                    "peak_activity_hour": usage_metrics["peak_activity_hour"],
+
+                    # Raw series for reporting if needed
+                    "active_players_per_day_series": usage_metrics["active_players_per_day"],
+                    "usage_by_day_of_week_series": usage_metrics["usage_by_day_of_week"],
+                    "usage_by_hour_series": usage_metrics["usage_by_hour"],
+                    "usage_by_hour_buckets_series": usage_metrics["usage_by_hour_buckets"],
+                }
+
+            except Exception as e:
+                logger.error(f"Error computing scope metrics for {scope_label}: {e}")
+
+        # Comparison plot: descriptor-based vs reward-based
+        try:
+            comparison_counts = dict(descriptor_active_counts_for_comparison)
+            comparison_counts["Reward-based (legacy)"] = reward_based_active_users_count
+            save_active_user_comparison_plot(comparison_counts)
+        except Exception as e:
+            logger.error(f"Error plotting descriptor-vs-reward active user comparison: {e}")
+
+    except Exception as e:
+        logger.error(f"Error computing descriptor-based scope analysis: {e}")
 
     # Descriptive stats (drop 'properties' if present)
     try:
@@ -123,7 +275,6 @@ def analyze_activities(
         save_wave_comparisons_plot(activities)
         save_wave_comparisons_by_activity_type_plot(activities)
         save_wave_points_by_activity_type_plot(activities)
-        # By player: heatmaps for counts and avg points
         save_wave_comparisons_by_player_plot(activities)
     except Exception as e:
         logger.error(f"Error creating wave comparisons: {e}")
@@ -135,28 +286,28 @@ def analyze_activities(
     except Exception as e:
         logger.error(f"Error creating activities over time visualization: {e}")
 
-    # Points by activity type (total)
+    # Points by activity type (total) -- unchanged
     try:
         points_by_type = activities.groupby("type")["points"].sum().sort_values(ascending=False)
         save_points_by_activity_type_plot(points_by_type)
     except Exception as e:
         logger.error(f"Error creating points by activity type visualization: {e}")
 
-    # Points by player
+    # Points by player -- unchanged
     try:
         points_by_user = activities.groupby("pid")["points"].sum().sort_values(ascending=False)
         save_points_by_player_plot(points_by_user)
     except Exception as e:
         logger.error(f"Error creating points by user visualization: {e}")
 
-    # Rewards by activity type (mean)
+    # Rewards by activity type (mean) -- unchanged
     try:
         rewards_by_type = activities.groupby("type")["points"].mean().sort_values(ascending=False)
         save_rewards_by_activity_type_plot(rewards_by_type)
     except Exception as e:
         logger.error(f"Error creating rewards by activity type visualization: {e}")
 
-    # Points over time
+    # Points over time -- unchanged
     try:
         daily_points = activities.groupby("date")["points"].sum()
         save_points_over_time_plot(daily_points)
@@ -205,7 +356,9 @@ def analyze_activities(
                 return None
 
             rewards_df["reward_points"] = rewards_df["detailed_rewards"].apply(_extract_reward_points)
-            rewards_df[["challenge_name", "challenge_id"]] = rewards_df["detailed_rewards"].apply(lambda r: pd.Series(_extract_challenge(r)))
+            rewards_df[["challenge_name", "challenge_id"]] = rewards_df["detailed_rewards"].apply(
+                lambda r: pd.Series(_extract_challenge(r))
+            )
             rewards_df["rule_name"] = rewards_df["detailed_rewards"].apply(_extract_rule)
 
             rewards_df["challenge_name"] = rewards_df["challenge_name"].fillna("Unknown")
@@ -217,7 +370,6 @@ def analyze_activities(
         logger.error(f"Error creating challenge/rule analyses: {e}")
 
     # User activity distribution
-    user_activity = None
     try:
         user_activity = activities.groupby("pid").size().sort_values(ascending=False)
         save_player_activity_distribution_plot(user_activity)
@@ -229,7 +381,6 @@ def analyze_activities(
         if activities["pid"].nunique() >= 2 and activities["type"].nunique() >= 2:
             user_type_counts = pd.crosstab(activities["pid"], activities["type"])
             if not user_type_counts.empty:
-                # Normalize by row
                 row_sums = user_type_counts.sum(axis=1)
                 user_type_counts = user_type_counts[row_sums > 0]
                 user_type_counts_norm = user_type_counts.div(user_type_counts.sum(axis=1), axis=0)
@@ -251,10 +402,19 @@ def analyze_activities(
         campaign_metrics = compute_campaign_metrics(activities, csv_data)
         unique_users_count = int(campaign_metrics.get("unique_users", 0))
 
-        # Keep the existing extra fields that are produced in analyze_activities
-        campaign_metrics["active_users_count"] = active_users_count
-        campaign_metrics["passive_users_count"] = passive_users_count
-        campaign_metrics["passive_user_ids"] = passive_user_ids
+        campaign_metrics["enrolled_users_count"] = len(enrolled_user_ids)
+        campaign_metrics["app_scope_metrics"] = app_scope_metrics
+
+        # Backward compatibility: top-level active/passive now means Combined descriptor-based
+        combined_scope = app_scope_metrics.get("combined", {})
+        campaign_metrics["active_users_count"] = int(combined_scope.get("active_users_count", 0))
+        campaign_metrics["passive_users_count"] = int(combined_scope.get("passive_users_count", 0))
+        campaign_metrics["passive_user_ids"] = combined_scope.get("passive_user_ids", [])
+
+        # Legacy comparison (reward-based)
+        campaign_metrics["reward_based_active_users_count"] = reward_based_active_users_count
+        campaign_metrics["reward_based_passive_users_count"] = reward_based_passive_users_count
+        campaign_metrics["reward_based_passive_user_ids"] = reward_based_passive_user_ids
 
         try:
             generate_descriptive_summary_text(activities, csv_data, campaign_metrics)
@@ -285,7 +445,6 @@ def analyze_activities(
         joining_result = compute_joining_metrics(activities, csv_data)
         joining_metrics = joining_result["metrics"]
 
-        # Reuse the enriched per-user frame returned by the helper
         user_dropout = joining_result["user_dropout"]
 
         if joining_metrics is not None and not user_dropout.empty:
@@ -352,50 +511,17 @@ def analyze_activities(
     except Exception as e:
         logger.error(f"Error creating churn rate visualization: {e}")
 
-    # Usage by day of week
-    try:
-        plot_data = activities.copy()
-        plot_data["day_of_week"] = pd.to_datetime(plot_data["date"], errors="coerce").dt.day_name()
-        day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        activities_by_day = plot_data.groupby("day_of_week").size().reindex(day_order).fillna(0).astype(int)
-
-        save_usage_by_day_of_week_plot(activities_by_day)
-
-    except Exception as e:
-        logger.error(f"Error creating day-of-week usage plot: {e}")
-
-
-    # Heatmap: day-of-week x hour
-    try:
-        heatmap_data = activities.copy()
-        heatmap_data["day_of_week"] = pd.to_datetime(heatmap_data["date"], errors="coerce").dt.day_name()
-        day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-
-        activity_heatmap_data = pd.crosstab(
-            index=heatmap_data["day_of_week"],
-            columns=heatmap_data["hour"],
-        ).fillna(0)
-        activity_heatmap_data = activity_heatmap_data.reindex(day_order).fillna(0)
-        activity_heatmap_data = activity_heatmap_data.reindex(columns=range(24), fill_value=0)
-
-        save_activity_heatmap_by_time_plot(activity_heatmap_data)
-    except Exception as e:
-        logger.error(f"Error creating activity heatmap by time: {e}")
-
-
     # Stacked bar: top activity types by date (daily)
     try:
         save_activity_types_stacked_by_date_plot(activities)
     except Exception as e:
         logger.error(f"Error creating stacked bar chart by date: {e}")
 
-
     # User engagement heatmap by day (guarded)
     try:
         save_player_engagement_heatmap_plot(activities)
     except Exception as e:
         logger.error(f"Error creating user engagement heatmap: {e}")
-
 
     return activities, unique_users_count, dropout_metrics, joining_metrics, campaign_metrics
 
@@ -450,13 +576,13 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
     except Exception as e:
         logger.error(f"Error creating hour/day heatmaps: {e}")
 
-    # Active users per day
-    try:
-        if "pid" in activities_df.columns and "date" in activities_df.columns:
-            active_users_per_day = activities_df.groupby("date")["pid"].nunique().sort_index()
-            save_active_players_per_day_plot(active_users_per_day)
-    except Exception as e:
-        logger.error(f"Error plotting active users per day: {e}")
+    # # Active users per day
+    # try:
+    #     if "pid" in activities_df.columns and "date" in activities_df.columns:
+    #         active_users_per_day = activities_df.groupby("date")["pid"].nunique().sort_index()
+    #         save_active_players_per_day_plot(active_users_per_day)
+    # except Exception as e:
+    #     logger.error(f"Error plotting active users per day: {e}")
 
     # Completed tasks analysis (rules from rewardedParticipations -> provider mapping)
     try:
@@ -554,98 +680,7 @@ def analyze_visualizations_challenges_tasks(csv_data: Dict[str, pd.DataFrame]) -
         logger.error(f"Error generating completed tasks analysis: {e}")
 
 
-# -----------------------------------------------------------------------------
-# Geofence analysis (FIXED: indentation + robust numeric handling)
-# -----------------------------------------------------------------------------
-def analyze_geofence_data(json_data: Dict[str, Union[pd.DataFrame, Dict]]) -> None:
-    geofence_dfs = []
 
-    for key, data in json_data.items():
-        if "geofence" not in key.lower():
-            continue
-        if not isinstance(data, pd.DataFrame):
-            continue
-
-        # Extract player id from key (supports player_123_geofence or user_123_geofence)
-        try:
-            parts = key.split("_")
-            if len(parts) >= 3 and parts[0] in ("player", "user"):
-                player_id = parts[1]
-            else:
-                logger.warning(f"Key {key} does not match expected geofence naming; skipping")
-                continue
-
-            df = data.copy()
-            df["player_id"] = player_id
-            df["user_id"] = player_id  # backward compatibility
-
-            required_columns = ["LATITUDE", "LONGITUDE", "ALTITUDE", "SPEED", "ERROR", "TIMESTAMP"]
-            for col in required_columns:
-                if col not in df.columns:
-                    df[col] = pd.NaT if col == "TIMESTAMP" else 0
-
-            geofence_dfs.append(df)
-        except Exception as e:
-            logger.warning(f"Error extracting player id from {key}: {e}")
-
-    if not geofence_dfs:
-        logger.warning("No geofence data found")
-        return
-
-    all_geofence_data = pd.concat(geofence_dfs, ignore_index=True)
-
-    if "TIMESTAMP" in all_geofence_data.columns:
-        all_geofence_data["TIMESTAMP"] = pd.to_datetime(all_geofence_data["TIMESTAMP"], errors="coerce")
-
-    for col in ["LATITUDE", "LONGITUDE", "ALTITUDE", "SPEED", "ERROR"]:
-        if col in all_geofence_data.columns:
-            all_geofence_data[col] = pd.to_numeric(all_geofence_data[col], errors="coerce")
-
-    speed_series = all_geofence_data["SPEED"].dropna()
-    if speed_series.empty:
-        logger.warning("No valid SPEED values in geofence data; skipping geofence analysis")
-        return
-
-    # Outlier trimming (3*IQR)
-    Q1 = speed_series.quantile(0.25)
-    Q3 = speed_series.quantile(0.75)
-    IQR = Q3 - Q1
-    lower_bound = Q1 - 3 * IQR
-    upper_bound = Q3 + 3 * IQR
-
-    filtered = all_geofence_data[(all_geofence_data["SPEED"] >= lower_bound) & (all_geofence_data["SPEED"] <= upper_bound)].copy()
-    if filtered.empty:
-        logger.warning("All geofence rows were removed after outlier filtering; skipping geofence plots")
-        return
-    logger.info(f"Geofence outliers removed: {len(all_geofence_data) - len(filtered)}")
-
-
-    # Temporal analysis
-    if "TIMESTAMP" in filtered.columns and not filtered["TIMESTAMP"].isna().all():
-        filtered["hour_of_day"] = filtered["TIMESTAMP"].dt.hour
-        filtered["hour_of_day"] = pd.Categorical(
-            filtered["hour_of_day"],
-            categories=list(range(24)),
-            ordered=True,
-        )
-
-        save_geofence_hourly_activity_plot(filtered)
-        save_geofence_speed_by_hour_plot(filtered)
-
-
-        # Trajectory plot (color by speed)
-        try:
-            trajectory_data = filtered.sort_values("TIMESTAMP").dropna(subset=["LONGITUDE", "LATITUDE"])
-            save_geofence_movement_trajectory_plot(trajectory_data)
-        except Exception as e:
-            logger.warning(f"Could not create movement trajectory plot: {e}")
-
-
-    # 3D visualization
-    try:
-        save_geofence_3d_visualization_plot(filtered)
-    except Exception as e:
-        logger.warning(f"Could not create 3D visualization: {e}")
 
 
 # -----------------------------------------------------------------------------

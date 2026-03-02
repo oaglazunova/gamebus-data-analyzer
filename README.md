@@ -1,4 +1,4 @@
-# GameBus Data Analyzer v1.5
+# GameBus Data Analyzer v1.1
 
 A tool for extracting and analyzing health behavior data from the GameBus platform.
 
@@ -67,7 +67,7 @@ Follow these steps if you're new to running Python projects on Windows. Use Wind
   ```
   .\.venv\Scripts\Activate.ps1
   ```
-- If you get “running scripts is disabled on this system”, temporarily allow it for this session:
+- If you get “running scripts is disabled on this system,” temporarily allow it for this session:
   ```
   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
   .\.venv\Scripts\Activate.ps1
@@ -222,18 +222,12 @@ See the documentation in `src/analysis/data_analysis.py` for details on specific
 - `paths.py`: File paths used throughout the project
 - `settings.py`: General settings including valid game descriptors and API parameters
 - `users.xlsx`: User credentials for GameBus API access (you must create this)
-- `campaign_data.xlsx`: Campaign activity data (required for analysis), provided as either:
-  - `campaign_data.xlsx` (single Excel file with multiple sheets), or
-  - CSV files under `config/campaign_data/` (one CSV per sheet; filenames become sheet names).
-  - If both are present, CSV files override matching sheets from `campaign_data.xlsx`.
-- Campaign description data (required for analysis), provided as either:
-  - `campaign_desc.xlsx` (single Excel file with multiple sheets), or
-  - CSV files under `config/campaign_desc/` (one CSV per sheet; filenames become sheet names).
-  - If both are present, CSV files override matching sheets from `campaign_desc.xlsx`.
+- `campaign_data.zip`: Campaign activity data (required for analysis), downloaded from GameBus Campaigns Editor
+- `campaign_desc.xlsx`: Campaign properties, downloaded from GameBus Campaigns Editor
 
 ### API Key
 
-The GameBus API key must be stored in a `.env` file in the root directory:
+The GameBus API key must be stored in a `.env` file in the root directory.
 For the API key, contact GameBus team.
 
 ```

@@ -4,7 +4,7 @@ import os
 import json
 import glob
 import ast
-from typing import Dict, Union, List
+from typing import Dict, Union, List, Any
 import pandas as pd
 
 from src.analysis.common import ensure_dir, CONFIG_DIR, RAW_DATA_DIR, logger
@@ -20,18 +20,21 @@ def _load_excel_sheets(path: str, prefix: str = "") -> Dict[str, pd.DataFrame]:
         return sheets
 
     try:
-        xl = pd.ExcelFile(path)
-        for sheet_name in xl.sheet_names:
-            try:
-                df = pd.read_excel(path, sheet_name=sheet_name)
-                if df.empty:
-                    logger.warning(f"Sheet '{sheet_name}' in {path} is empty; skipping")
-                    continue
-                key = f"{prefix}{sheet_name}"
-                sheets[key] = df
-                logger.info(f"Loaded sheet '{sheet_name}' from {path} ({len(df)} rows, {len(df.columns)} cols)")
-            except Exception as e:
-                logger.error(f"Error loading sheet '{sheet_name}' from {path}: {e}")
+        with pd.ExcelFile(path) as xl:
+            for sheet_name in xl.sheet_names:
+                try:
+                    df = xl.parse(sheet_name)
+                    if df.empty:
+                        logger.warning(f"Sheet '{sheet_name}' in {path} is empty; skipping")
+                        continue
+                    key = f"{prefix}{sheet_name}"
+                    sheets[key] = df
+                    logger.info(
+                        f"Loaded sheet '{sheet_name}' from {path} "
+                        f"({len(df)} rows, {len(df.columns)} cols)"
+                    )
+                except Exception as e:
+                    logger.error(f"Error loading sheet '{sheet_name}' from {path}: {e}")
     except Exception as e:
         logger.error(f"Error opening {path}: {e}")
 
@@ -170,35 +173,75 @@ def load_json_files() -> Dict[str, Union[pd.DataFrame, Dict]]:
 # -----------------------------------------------------------------------------
 # Rewards parsing
 # -----------------------------------------------------------------------------
-def _parse_rewards_jsonlike(rewards_str: str) -> List[Dict]:
-    if not isinstance(rewards_str, str) or not rewards_str.strip():
+def _parse_rewards_jsonlike(rewards_value: Any) -> List[Dict]:
+    """
+    Parse reward payloads that may come as:
+    - JSON string
+    - Python-literal-like string
+    - already-materialized list[dict]
+    - empty / NaN / None
+    """
+    if rewards_value is None:
         return []
-    s = rewards_str.strip()
+
+    # Already parsed
+    if isinstance(rewards_value, list):
+        return [r for r in rewards_value if isinstance(r, dict)]
+
+    # Sometimes a single dict may appear instead of a list
+    if isinstance(rewards_value, dict):
+        return [rewards_value]
+
+    # Handle pandas NaN / NA
+    try:
+        if pd.isna(rewards_value):
+            return []
+    except Exception:
+        pass
+
+    if not isinstance(rewards_value, str):
+        return []
+
+    s = rewards_value.strip()
+    if not s:
+        return []
 
     # strict json
     try:
         obj = json.loads(s)
-        return obj if isinstance(obj, list) else []
+        if isinstance(obj, list):
+            return [r for r in obj if isinstance(r, dict)]
+        if isinstance(obj, dict):
+            return [obj]
+        return []
     except Exception:
         pass
 
     # json with single quotes
     try:
         obj = json.loads(s.replace("'", '"'))
-        return obj if isinstance(obj, list) else []
+        if isinstance(obj, list):
+            return [r for r in obj if isinstance(r, dict)]
+        if isinstance(obj, dict):
+            return [obj]
+        return []
     except Exception:
         pass
 
     # python literal
     try:
         obj = ast.literal_eval(s)
-        return obj if isinstance(obj, list) else []
+        if isinstance(obj, list):
+            return [r for r in obj if isinstance(r, dict)]
+        if isinstance(obj, dict):
+            return [obj]
+        return []
     except Exception:
         return []
 
 
-def extract_points(rewards_str: str) -> int:
-    rewards = _parse_rewards_jsonlike(rewards_str)
+def extract_points(rewards_value: Any) -> int:
+    rewards = _parse_rewards_jsonlike(rewards_value)
     total = 0
     for r in rewards:
         if isinstance(r, dict):
@@ -209,5 +252,5 @@ def extract_points(rewards_str: str) -> int:
     return total
 
 
-def extract_detailed_rewards(rewards_str: str) -> List[Dict]:
-    return _parse_rewards_jsonlike(rewards_str)
+def extract_detailed_rewards(rewards_value: Any) -> List[Dict]:
+    return _parse_rewards_jsonlike(rewards_value)

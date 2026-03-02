@@ -7,9 +7,12 @@ A tool for extracting and analyzing health behavior data from the GameBus platfo
 This project extracts user activity data from the GameBus API and performs various analyses to generate insights about user behavior, activity patterns, and engagement.
 The script can technically run on Linux and Mac, but officially we support only Windows.
 
+If new game decriptors were added to GameBus, the list of game descriptors in `\config\settings.py` also needs to be updated. You can also use this list to limit extracted data by commenting out certain game descriptors.
+
+
 ## Quick Start
 
-1. **Install Python** (preferably versions 3.9 or 3.11) and clone this repository
+1. **Install Python** (the script was tested with versions 3.9 & 3.11) and clone this repository
 2. **Set up environment**: 
    ```
    python -m venv .venv
@@ -25,11 +28,17 @@ The script can technically run on Linux and Mac, but officially we support only 
 
 4. **Run**:
    ```
-   python pipeline.py                    # Full pipeline (extraction + analysis)
-   python pipeline.py --extract          # Only extract data
-   python pipeline.py --analyze          # Only analyze existing data
+   python pipeline.py                    # Full pipeline (extraction + analysis), or:
+   python pipeline.py --extract          # Only extract data, or:
+   python pipeline.py --analyze          # Only analyze existing data, or:
    python pipeline.py --log-level DEBUG  # Verbose logging
    ```
+
+Next time, you need only to activate the virtual environment, then run the script:
+```  
+   .venv\Scripts\activate
+   python pipeline.py
+```
 
 ## Detailed Start Guide
 
@@ -118,6 +127,12 @@ If `pip` is not recognized, always prefer `python -m pip ...` on Windows.
 - User-email mapping: `data_raw\user_email_mapping.txt` (auto-generated after extraction)
 - Analysis outputs: `data_analysis\`
 - Logs: `logs\data_extraction.log` and `logs\data_analysis.log`
+
+**Next time, you need only to activate the virtual environment, then run the script with the desired arguments:**
+```  
+   .venv\Scripts\activate
+   python pipeline.py
+```
 
 Troubleshooting on Windows
 - “python is not recognized”: try `py` instead (e.g., `py -3 -m venv .venv`, `py pipeline.py`).

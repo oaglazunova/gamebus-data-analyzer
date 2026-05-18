@@ -195,6 +195,7 @@ def create_and_save_figure(
     filename: str,
     figsize: Tuple[float, float] = (10, 6),
     bottom_adjust: Optional[float] = None,
+    apply_label_truncation: bool = True,
 ) -> None:
     output_dir = os.path.dirname(filename)
     if output_dir:
@@ -209,7 +210,8 @@ def create_and_save_figure(
     except Exception:
         pass
 
-    _apply_label_truncation(fig, LABEL_MAX_CHARS)
+    if apply_label_truncation:
+        _apply_label_truncation(fig, LABEL_MAX_CHARS)
 
     try:
         if bottom_adjust is not None:

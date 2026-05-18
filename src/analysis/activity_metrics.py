@@ -1,10 +1,356 @@
 from __future__ import annotations
 
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Union
+import os
+import re
+
 import pandas as pd
 
+from config.paths import RAW_DATA_DIR, USERS_FILE_PATH
 from src.analysis.loaders import extract_points, extract_detailed_rewards
-from src.analysis.common import WEEKDAY_ORDER, HOUR_BUCKET_LABELS, HOUR_BUCKET_BINS
+from src.analysis.common import WEEKDAY_ORDER, HOUR_BUCKET_LABELS, HOUR_BUCKET_BINS, logger
+
+
+
+PLAYER_ID_COLUMNS = (
+    "pid",
+    "playerId",
+    "player_id",
+    "playerID",
+    "X_PLAYER_ID",
+)
+
+USER_EMAIL_MAPPING_FILE = os.path.join(RAW_DATA_DIR, "user_email_mapping.txt")
+
+
+def _normalize_user_id(value: Any) -> Optional[str]:
+    """
+    Convert a player identifier to a stable string representation.
+
+    This prevents mismatches such as 454, 454.0, and "454" being treated
+    as three different users.
+    """
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+
+    if value is None:
+        return None
+
+    if isinstance(value, int):
+        return str(value)
+
+    if isinstance(value, float):
+        if pd.isna(value):
+            return None
+        if value.is_integer():
+            return str(int(value))
+        return str(value).strip()
+
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none", "null"}:
+        return None
+
+    if re.fullmatch(r"\d+\.0", text):
+        return text[:-2]
+
+    return text
+
+
+def _normalize_email(value: Any) -> Optional[str]:
+    """
+    Normalize an email address for comparison between users.xlsx and
+    user_email_mapping.txt.
+    """
+    try:
+        if pd.isna(value):
+            return None
+    except Exception:
+        pass
+
+    if value is None:
+        return None
+
+    text = str(value).strip().lower()
+    if not text or text in {"nan", "none", "null"}:
+        return None
+
+    return text
+
+
+def _find_column_case_insensitive(df: pd.DataFrame, wanted_name: str) -> Optional[str]:
+    wanted = wanted_name.strip().lower()
+    for col in df.columns:
+        if isinstance(col, str) and col.strip().lower() == wanted:
+            return col
+    return None
+
+
+def _find_player_id_column(df: pd.DataFrame) -> Optional[str]:
+    """
+    Return the first known player-id column in a table, if present.
+
+    Intentionally does not use generic columns such as "id" or "userId",
+    because those may refer to activities, accounts, tasks, or other entities.
+    """
+    for candidate in PLAYER_ID_COLUMNS:
+        if candidate in df.columns:
+            return candidate
+
+    lowered = {
+        col.strip().lower(): col
+        for col in df.columns
+        if isinstance(col, str)
+    }
+    for candidate in PLAYER_ID_COLUMNS:
+        match = lowered.get(candidate.lower())
+        if match is not None:
+            return match
+
+    return None
+
+
+def read_users_xlsx_emails(users_file: str = USERS_FILE_PATH) -> set[str]:
+    """
+    Read the authoritative participant roster from config/users.xlsx.
+
+    users.xlsx is the source of truth for the analysis cohort. It is expected
+    to contain emails and passwords, but not player IDs.
+    """
+    if not os.path.exists(users_file):
+        raise FileNotFoundError(f"users.xlsx not found: {users_file}")
+
+    users_df = pd.read_excel(users_file)
+    email_col = _find_column_case_insensitive(users_df, "email")
+    if email_col is None:
+        raise ValueError(f"users.xlsx must contain an 'email' column: {users_file}")
+
+    emails = {
+        email
+        for email in users_df[email_col].map(_normalize_email)
+        if email is not None
+    }
+
+    if not emails:
+        raise ValueError(f"No valid participant emails found in users.xlsx: {users_file}")
+
+    return emails
+
+
+
+def ensure_user_email_mapping_exists(
+    mapping_file: Optional[str] = None,
+    *,
+    force: bool = False,
+) -> str:
+    """
+    Ensure data_raw/user_email_mapping.txt exists before analysis.
+
+    If the mapping file is missing or empty, generate it automatically by
+    logging in users from config/users.xlsx and resolving their GameBus
+    player_id values.
+
+    If force=True, regenerate the file even if it already exists. This is used
+    once when the existing mapping does not cover all emails in users.xlsx.
+    """
+    if mapping_file is None:
+        mapping_file = USER_EMAIL_MAPPING_FILE
+
+    mapping_exists = os.path.exists(mapping_file) and os.path.getsize(mapping_file) > 0
+
+    if mapping_exists and not force:
+        return mapping_file
+
+    if not os.path.exists(USERS_FILE_PATH):
+        raise FileNotFoundError(
+            f"Cannot generate user-email mapping because users.xlsx was not found: "
+            f"{USERS_FILE_PATH}"
+        )
+
+    logger.info(
+        "Generating user-email mapping file for analysis: "
+        f"{mapping_file}"
+    )
+
+    try:
+        from src.scripts.create_user_email_mapping import main as build_user_email_mapping
+    except Exception as e:
+        raise RuntimeError(
+            "Could not import src.scripts.create_user_email_mapping. "
+            "Cannot generate user-email mapping automatically."
+        ) from e
+
+    try:
+        build_user_email_mapping()
+    except Exception as e:
+        raise RuntimeError(
+            "Failed to generate user_email_mapping.txt automatically."
+        ) from e
+
+    if not os.path.exists(mapping_file) or os.path.getsize(mapping_file) == 0:
+        raise FileNotFoundError(
+            "user_email_mapping.txt is required for participant-filtered analysis, "
+            "but automatic generation did not produce a valid file. "
+            f"Expected file: {mapping_file}"
+        )
+
+    return mapping_file
+
+
+
+
+def read_user_email_mapping(mapping_file: Optional[str] = None) -> dict[str, str]:
+    """
+    Read data_raw/user_email_mapping.txt and return {normalized_email: player_id}.
+
+    Expected line format generated by src.scripts.create_user_email_mapping:
+        player_id=454 user_id=123: user@example.org
+
+    If the mapping file is missing, it is generated automatically.
+    """
+    mapping_file = ensure_user_email_mapping_exists(mapping_file)
+
+    email_to_pid: dict[str, str] = {}
+    line_re = re.compile(r"player_id\s*=\s*([^\s:]+).*?:\s*(\S+@\S+)", re.IGNORECASE)
+
+    with open(mapping_file, "r", encoding="utf-8") as fh:
+        for raw_line in fh:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            match = line_re.search(line)
+            if not match:
+                logger.warning(f"Could not parse user-email mapping line: {line}")
+                continue
+
+            pid = _normalize_user_id(match.group(1))
+            email = _normalize_email(match.group(2))
+
+            if pid is not None and email is not None:
+                email_to_pid[email] = pid
+
+    if not email_to_pid:
+        raise ValueError(f"No valid entries found in user-email mapping: {mapping_file}")
+
+    return email_to_pid
+
+
+def resolve_analysis_user_ids(
+    users_file: str = USERS_FILE_PATH,
+    mapping_file: Optional[str] = None,
+) -> set[str]:
+    """
+    Resolve the exact player-id cohort to analyze.
+
+    Logic:
+    1. Read participant emails from config/users.xlsx.
+    2. Ensure data_raw/user_email_mapping.txt exists.
+    3. Read player_id <-> email mappings.
+    4. Keep only player IDs whose email is present in users.xlsx.
+    5. If the mapping is stale/incomplete, regenerate it once and retry.
+
+    This prevents campaign/test accounts that appear in campaign_data.zip from
+    being included in statistics.
+    """
+    roster_emails = read_users_xlsx_emails(users_file)
+
+    resolved_mapping_file = ensure_user_email_mapping_exists(mapping_file)
+    email_to_pid = read_user_email_mapping(resolved_mapping_file)
+
+    missing_emails = sorted(email for email in roster_emails if email not in email_to_pid)
+
+    if missing_emails:
+        logger.warning(
+            "Existing user_email_mapping.txt does not cover all emails in users.xlsx. "
+            "Regenerating mapping once before failing."
+        )
+
+        resolved_mapping_file = ensure_user_email_mapping_exists(
+            resolved_mapping_file,
+            force=True,
+        )
+        email_to_pid = read_user_email_mapping(resolved_mapping_file)
+        missing_emails = sorted(email for email in roster_emails if email not in email_to_pid)
+
+    if missing_emails:
+        preview = ", ".join(missing_emails[:10])
+        suffix = "" if len(missing_emails) <= 10 else f" ... and {len(missing_emails) - 10} more"
+
+        raise ValueError(
+            "Could not resolve player_id for every email in users.xlsx. "
+            f"Missing {len(missing_emails)} email(s): {preview}{suffix}. "
+            "Analysis stopped to avoid including test accounts."
+        )
+
+    participant_ids = {email_to_pid[email] for email in roster_emails}
+
+    if not participant_ids:
+        raise ValueError("No participant player IDs could be resolved from users.xlsx")
+
+    return participant_ids
+
+
+def filter_dataframe_to_user_ids(df: pd.DataFrame, participant_ids: set[str]) -> pd.DataFrame:
+    """
+    Filter one DataFrame to the authoritative participant cohort if it has a
+    player-id column. Tables without a player-id column are returned unchanged.
+    """
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return df
+
+    player_col = _find_player_id_column(df)
+    if player_col is None:
+        return df.copy()
+
+    out = df.copy()
+    normalized_ids = out[player_col].map(_normalize_user_id)
+    out = out[normalized_ids.isin(participant_ids)].copy()
+    out[player_col] = out[player_col].map(_normalize_user_id)
+    return out
+
+
+def filter_tabular_data_to_user_ids(
+    data: Dict[str, pd.DataFrame],
+    participant_ids: set[str],
+) -> Dict[str, pd.DataFrame]:
+    """
+    Filter all loaded Excel/CSV tables to the authoritative participant cohort.
+
+    This affects activities, aggregation, navigation events, notification events,
+    sensor events, and any other table with a known player-id column.
+    """
+    return {
+        key: filter_dataframe_to_user_ids(df, participant_ids)
+        if isinstance(df, pd.DataFrame)
+        else df
+        for key, df in data.items()
+    }
+
+
+def filter_json_data_to_user_ids(
+    data: Dict[str, Union[pd.DataFrame, Dict]],
+    participant_ids: set[str],
+) -> Dict[str, Union[pd.DataFrame, Dict]]:
+    """
+    Filter loaded JSON-derived DataFrames to the authoritative participant cohort.
+
+    Extracted descriptor JSON files usually contain X_PLAYER_ID. Dictionary
+    payloads without a recognized player-id column are left unchanged.
+    """
+    filtered: Dict[str, Union[pd.DataFrame, Dict]] = {}
+
+    for key, value in data.items():
+        if isinstance(value, pd.DataFrame):
+            filtered[key] = filter_dataframe_to_user_ids(value, participant_ids)
+        else:
+            filtered[key] = value
+
+    return filtered
+
+
 
 
 GAMEBUS_ACTIVE_TYPES = [
@@ -77,6 +423,9 @@ def normalize_activity_columns(activities: pd.DataFrame) -> pd.DataFrame:
     Normalize timestamps and derive commonly used activity columns.
     """
     activities = activities.copy()
+
+    activities["pid"] = activities["pid"].map(_normalize_user_id)
+    activities = activities[activities["pid"].notna()].copy()
 
     activities["createdAt"] = pd.to_datetime(activities["createdAt"], errors="coerce", utc=True)
     activities["date"] = activities["createdAt"].dt.floor("D")
@@ -237,10 +586,11 @@ def compute_dropout_metrics(activities: pd.DataFrame) -> dict:
     ).round(2)
 
     metrics = {
-        "avg_dropout_days": float(dropout_stats.get("mean", 0.0)),
-        "median_dropout_days": float(dropout_stats.get("50%", 0.0)),
-        "min_dropout_days": float(dropout_stats.get("min", 0.0)),
-        "max_dropout_days": float(dropout_stats.get("max", 0.0)),
+        "avg_dropout_days": _safe_float(dropout_stats.get("mean", 0.0)),
+        "median_dropout_days": _safe_float(dropout_stats.get("50%", 0.0)),
+        "min_dropout_days": _safe_float(dropout_stats.get("min", 0.0)),
+        "max_dropout_days": _safe_float(dropout_stats.get("max", 0.0)),
+        "std_dropout_days": _safe_float(dropout_stats.get("std", 0.0)),
     }
 
     return {
@@ -284,10 +634,11 @@ def compute_joining_metrics(
     ).round(2)
 
     metrics = {
-        "avg_joining_days": float(joining_stats.get("mean", 0.0)),
-        "median_joining_days": float(joining_stats.get("50%", 0.0)),
-        "min_joining_days": float(joining_stats.get("min", 0.0)),
-        "max_joining_days": float(joining_stats.get("max", 0.0)),
+        "avg_joining_days": _safe_float(joining_stats.get("mean", 0.0)),
+        "median_joining_days": _safe_float(joining_stats.get("50%", 0.0)),
+        "min_joining_days": _safe_float(joining_stats.get("min", 0.0)),
+        "max_joining_days": _safe_float(joining_stats.get("max", 0.0)),
+        "std_joining_days": _safe_float(joining_stats.get("std", 0.0)),
     }
 
     return {
@@ -295,55 +646,44 @@ def compute_joining_metrics(
         "user_dropout": user_dropout,
     }
 
-
-def _series_to_id_set(series: pd.Series) -> set:
+def _series_to_id_set(series: pd.Series) -> set[str]:
     """
-    Convert a Series of identifiers into a de-duplicated set,
+    Convert a Series of identifiers into a de-duplicated normalized string set,
     dropping NaN and blank-string values.
     """
-    values = series.dropna()
-    if values.empty:
+    if series.empty:
         return set()
 
-    if values.dtype == object:
-        as_text = values.astype(str).str.strip()
-        values = values[as_text != ""]
-
-    return set(values.tolist())
+    return {
+        normalized
+        for normalized in series.map(_normalize_user_id)
+        if normalized is not None
+    }
 
 
 def get_enrolled_user_ids(
     csv_data: Dict[str, pd.DataFrame],
     activities: pd.DataFrame,
-) -> set:
+) -> set[str]:
     """
     Determine the enrolled user base.
 
-    Preferred behavior:
-    - scan all non-desc, non-activities sheets for user-id-like columns
-    - if nothing usable is found, fall back to all users seen in activities
+    In normal project runs, the enrolled base is the authoritative users.xlsx
+    roster resolved through user_email_mapping.txt. This deliberately avoids
+    using aggregation/activity campaign exports as the cohort source, because
+    those exports can contain test accounts.
+
+    A fallback to activities is allowed only when users.xlsx is absent, which
+    keeps small developer/unit-test scenarios usable without reintroducing the
+    production bug.
     """
-    candidate_columns = ("pid", "playerId", "participantId", "userId", "id")
-    enrolled_user_ids: set = set()
-
-    for sheet_name, df in csv_data.items():
-        if not isinstance(df, pd.DataFrame) or df.empty:
-            continue
-
-        if sheet_name == "activities":
-            continue
-
-        if isinstance(sheet_name, str) and sheet_name.startswith("desc_"):
-            continue
-
-        for col in candidate_columns:
-            if col in df.columns:
-                enrolled_user_ids.update(_series_to_id_set(df[col]))
-
-    if enrolled_user_ids:
-        return enrolled_user_ids
-
-    return _series_to_id_set(activities["pid"])
+    try:
+        return resolve_analysis_user_ids()
+    except FileNotFoundError as e:
+        if os.path.exists(USERS_FILE_PATH):
+            raise
+        logger.warning(f"No users.xlsx available; falling back to users seen in activities: {e}")
+        return _series_to_id_set(activities["pid"])
 
 
 def filter_activities_by_types(
@@ -438,6 +778,25 @@ def _safe_max(series: pd.Series) -> float:
     if series.empty:
         return 0.0
     return float(series.max())
+
+def _safe_std(series: pd.Series) -> float:
+    if series.empty or len(series.dropna()) <= 1:
+        return 0.0
+
+    value = series.std()
+    if pd.isna(value):
+        return 0.0
+
+    return float(value)
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if pd.isna(value):
+            return default
+        return float(value)
+    except Exception:
+        return default
 
 
 def compute_scope_usage_metrics(
@@ -563,18 +922,21 @@ def compute_scope_usage_metrics(
         "active_days_per_participant": active_days_per_participant,
         "avg_active_days_per_participant": _safe_mean(active_days_per_participant),
         "median_active_days_per_participant": _safe_median(active_days_per_participant),
+        "std_active_days_per_participant": _safe_std(active_days_per_participant),
         "min_active_days_per_participant": _safe_min(active_days_per_participant),
         "max_active_days_per_participant": _safe_max(active_days_per_participant),
 
         "active_players_per_day": active_players_per_day,
         "avg_active_players_per_day": _safe_mean(active_players_per_day),
         "median_active_players_per_day": _safe_median(active_players_per_day),
+        "std_active_players_per_day": _safe_std(active_players_per_day),
         "min_active_players_per_day": _safe_min(active_players_per_day),
         "max_active_players_per_day": _safe_max(active_players_per_day),
 
         "time_to_first_inactivity_by_user": time_to_first_inactivity,
         "avg_time_to_first_inactivity_days": _safe_mean(time_to_first_inactivity),
         "median_time_to_first_inactivity_days": _safe_median(time_to_first_inactivity),
+        "std_time_to_first_inactivity_days": _safe_std(time_to_first_inactivity),
         "min_time_to_first_inactivity_days": _safe_min(time_to_first_inactivity),
         "max_time_to_first_inactivity_days": _safe_max(time_to_first_inactivity),
 

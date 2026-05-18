@@ -22,6 +22,10 @@ from src.analysis.activity_metrics import (
     compute_active_passive_by_types,
     compute_scope_usage_metrics,
     filter_activities_by_types,
+    resolve_analysis_user_ids,
+    filter_tabular_data_to_user_ids,
+    filter_json_data_to_user_ids,
+    ensure_user_email_mapping_exists,
 )
 from src.analysis.activity_plots import (
     save_activity_types_distribution_plot,
@@ -81,7 +85,11 @@ def analyze_activities(
 
     try:
         enrolled_user_ids = get_enrolled_user_ids(csv_data, activities)
+    except Exception as e:
+        logger.error(f"Error resolving enrolled participant cohort: {e}")
+        return None
 
+    try:
         reward_based_active_user_ids = compute_reward_based_active_user_ids(activities)
         reward_based_passive_user_ids = sorted(list(enrolled_user_ids - reward_based_active_user_ids))
         reward_based_active_users_count = len(reward_based_active_user_ids)
@@ -95,7 +103,7 @@ def analyze_activities(
         activities["engagement_by_rewards"] = activities["pid"].map(reward_engagement_map)
 
     except Exception as e:
-        logger.error(f"Error computing enrolled/reward-based user metrics: {e}")
+        logger.error(f"Error computing reward-based user metrics: {e}")
 
     # ------------------------------------------------------------------
     # Descriptor-based scope analysis
@@ -217,16 +225,19 @@ def analyze_activities(
 
                     "avg_active_days_per_participant": usage_metrics["avg_active_days_per_participant"],
                     "median_active_days_per_participant": usage_metrics["median_active_days_per_participant"],
+                    "std_active_days_per_participant": usage_metrics["std_active_days_per_participant"],
                     "min_active_days_per_participant": usage_metrics["min_active_days_per_participant"],
                     "max_active_days_per_participant": usage_metrics["max_active_days_per_participant"],
 
                     "avg_active_players_per_day": usage_metrics["avg_active_players_per_day"],
                     "median_active_players_per_day": usage_metrics["median_active_players_per_day"],
+                    "std_active_players_per_day": usage_metrics["std_active_players_per_day"],
                     "min_active_players_per_day": usage_metrics["min_active_players_per_day"],
                     "max_active_players_per_day": usage_metrics["max_active_players_per_day"],
 
                     "avg_time_to_first_inactivity_days": usage_metrics["avg_time_to_first_inactivity_days"],
                     "median_time_to_first_inactivity_days": usage_metrics["median_time_to_first_inactivity_days"],
+                    "std_time_to_first_inactivity_days": usage_metrics["std_time_to_first_inactivity_days"],
                     "min_time_to_first_inactivity_days": usage_metrics["min_time_to_first_inactivity_days"],
                     "max_time_to_first_inactivity_days": usage_metrics["max_time_to_first_inactivity_days"],
 
@@ -813,6 +824,35 @@ def main() -> None:
 
         console_info(logger, f"[ANALYZE] Loaded {len(csv_data)} Excel sheet(s)")
         console_info(logger, f"[ANALYZE] Loaded {len(json_data)} JSON file(s)")
+
+        # Resolve the authoritative participant cohort from users.xlsx.
+        # If user_email_mapping.txt is missing or empty, generate it automatically.
+        try:
+            ensure_user_email_mapping_exists()
+
+            participant_ids = resolve_analysis_user_ids()
+
+            csv_data = filter_tabular_data_to_user_ids(csv_data, participant_ids)
+            json_data = filter_json_data_to_user_ids(json_data, participant_ids)
+
+            logger.info(
+                f"Resolved authoritative analysis cohort from users.xlsx: "
+                f"{len(participant_ids)} participant player ID(s)"
+            )
+            console_info(
+                logger,
+                f"[ANALYZE] Participant cohort resolved from users.xlsx: "
+                f"{len(participant_ids)} user(s)",
+            )
+
+        except Exception as e:
+            logger.error(f"Could not resolve participant cohort: {e}", exc_info=True)
+            console_error(
+                logger,
+                "[ANALYZE] Could not resolve participant cohort from users.xlsx. "
+                "Analysis stopped to avoid including test accounts.",
+            )
+            return
 
         # Analyze activities
         try:

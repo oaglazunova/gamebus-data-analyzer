@@ -232,6 +232,9 @@ def generate_descriptive_summary_text(
     acts_per_player = df.groupby("pid").size() if "pid" in df.columns else pd.Series(dtype=float)
     acts_pp_mean, acts_pp_sd = _mean_sd(acts_per_player)
 
+    acts_per_day = df.groupby("date").size() if "date" in df.columns else pd.Series(dtype=float)
+    acts_pd_mean, acts_pd_sd = _mean_sd(acts_per_day)
+
     points_per_player = (
         df.groupby("pid")["points"].sum()
         if ("pid" in df.columns and "points" in df.columns)
@@ -367,18 +370,23 @@ def generate_descriptive_summary_text(
         lines.append(
             f"  - Average active days / participant: "
             f"{scope.get('avg_active_days_per_participant', 0.0):.2f} days "
-            f"(median {scope.get('median_active_days_per_participant', 0.0):.2f})"
+            f"(median {scope.get('median_active_days_per_participant', 0.0):.2f}, "
+            f"std {scope.get('std_active_days_per_participant', 0.0):.2f})"
         )
+
         lines.append(
             f"  - Active players per day: "
             f"{scope.get('avg_active_players_per_day', 0.0):.2f} players/day "
-            f"(median {scope.get('median_active_players_per_day', 0.0):.2f})"
+            f"(median {scope.get('median_active_players_per_day', 0.0):.2f}, "
+            f"std {scope.get('std_active_players_per_day', 0.0):.2f})"
         )
+
         lines.append(
             f"  - Average time to first inactivity "
             f"(proxy = last-first activity): "
             f"{scope.get('avg_time_to_first_inactivity_days', 0.0):.2f} days "
-            f"(median {scope.get('median_time_to_first_inactivity_days', 0.0):.2f})"
+            f"(median {scope.get('median_time_to_first_inactivity_days', 0.0):.2f}, "
+            f"std {scope.get('std_time_to_first_inactivity_days', 0.0):.2f})"
         )
         lines.append("")
         lines.append("  Usage time / day of week (% of scoped activities):")
@@ -404,6 +412,10 @@ def generate_descriptive_summary_text(
     lines.extend(provider_lines if provider_lines else ["  - N/A (requires desc_tasks + rewards->rule mapping)"])
     lines.append("")
     lines.append(f"Average completed activities / participant: {_fmt_mean_sd(acts_pp_mean, acts_pp_sd)} activities")
+    lines.append(
+        f"Average completed activities / active day: "
+        f"{_fmt_mean_sd(acts_pd_mean, acts_pd_sd)} activities"
+    )
     lines.append(f"Average rewarded points / participant: {_fmt_mean_sd(ppp_mean, ppp_sd)} points")
     lines.append("")
     lines.append("Rewarded points by activity type (% of total points):")

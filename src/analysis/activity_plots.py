@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import textwrap
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -1217,14 +1219,19 @@ def save_active_passive_pie_chart(
     )
     legend_note = definition_note or default_definition_note
 
+    def _wrap(text: str, width: int = 52) -> str:
+        return textwrap.fill(str(text), width=width)
+
     def plot() -> None:
+        fig, ax = plt.subplots()
+
         try:
             cmap = plt.get_cmap(PIE_COLORMAP)
             colors = [cmap(0), cmap(3)]
         except Exception:
             colors = None
 
-        wedges, *_ = plt.pie(
+        wedges, *_ = ax.pie(
             sizes,
             labels=labels,
             autopct="%1.1f%%" if sum(sizes) > 0 else None,
@@ -1232,28 +1239,36 @@ def save_active_passive_pie_chart(
             startangle=90,
             wedgeprops={"edgecolor": "white"},
         )
-        plt.title(f"{scope_label}: Active vs Passive Users")
-        plt.axis("equal")
+
+        ax.set_title(f"{scope_label}: Active vs Passive Users")
+        ax.axis("equal")
 
         legend_labels = [
-            "Active: enrolled users with ≥1 qualifying activity",
-            "Passive: enrolled users with no qualifying activity",
-            legend_note,
+            _wrap("Active: enrolled users with ≥1 qualifying activity"),
+            _wrap("Passive: enrolled users with no qualifying activity"),
+            _wrap(legend_note),
         ]
-        plt.legend(
+
+        ax.legend(
             wedges + [wedges[0]],
             legend_labels,
             title="Definition",
-            loc="upper center",
-            bbox_to_anchor=(0.5, -0.14),
+            loc="upper left",
+            bbox_to_anchor=(0.02, -0.30, 0.96, 0.22),
+            mode="expand",
+            borderaxespad=0.0,
             ncol=1,
             frameon=True,
+            fontsize=10,
+            title_fontsize=11,
         )
 
     create_and_save_figure(
         plot,
         os.path.join(OUTPUT_VISUALIZATIONS_DIR, filename),
-        figsize=(8, 6),
+        figsize=(10, 7.5),
+        bottom_adjust=0.32,
+        apply_label_truncation=False,
     )
 
 

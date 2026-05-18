@@ -26,6 +26,9 @@ from src.analysis.activity_metrics import (
     filter_tabular_data_to_user_ids,
     filter_json_data_to_user_ids,
     ensure_user_email_mapping_exists,
+    COMBINED_ACTIVE_TYPES,
+    DROPOUT_INACTIVITY_DAYS,
+    compute_real_dropout_and_weekly_retention,
 )
 from src.analysis.activity_plots import (
     save_activity_types_distribution_plot,
@@ -53,6 +56,8 @@ from src.analysis.activity_plots import (
     save_steps_trend_plot, save_usage_by_hour_buckets_plot,
     save_usage_by_hour_plot,
     save_active_user_comparison_plot,
+    save_real_dropout_status_plot,
+    save_weekly_retention_plot,
 )
 from src.utils.logging import setup_logging, console_info, console_error
 from src.analysis.geofence_analysis import analyze_geofence_data
@@ -426,6 +431,29 @@ def analyze_activities(
         campaign_metrics["reward_based_active_users_count"] = reward_based_active_users_count
         campaign_metrics["reward_based_passive_users_count"] = reward_based_passive_users_count
         campaign_metrics["reward_based_passive_user_ids"] = reward_based_passive_user_ids
+
+        # Real dropout and weekly retention.
+        #
+        # This uses Combined qualifying activity types, not DAY_AGGREGATE.
+        # That means it measures engagement dropout/retention rather than passive
+        # sensor-sync continuity.
+        try:
+            retention_result = compute_real_dropout_and_weekly_retention(
+                activities=activities,
+                csv_data=csv_data,
+                enrolled_user_ids=enrolled_user_ids,
+                active_types=COMBINED_ACTIVE_TYPES,
+                inactivity_days=DROPOUT_INACTIVITY_DAYS,
+            )
+
+            campaign_metrics["real_dropout_metrics"] = retention_result["metrics"]
+            campaign_metrics["weekly_retention"] = retention_result["weekly_retention"]
+
+            save_real_dropout_status_plot(retention_result["user_dropout"])
+            save_weekly_retention_plot(retention_result["weekly_retention"])
+
+        except Exception as e:
+            logger.error(f"Error calculating real dropout / weekly retention metrics: {e}")
 
         try:
             generate_descriptive_summary_text(activities, csv_data, campaign_metrics)

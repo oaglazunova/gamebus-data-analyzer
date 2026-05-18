@@ -20,6 +20,8 @@ PLAYER_ID_COLUMNS = (
     "X_PLAYER_ID",
 )
 
+DROPOUT_INACTIVITY_DAYS = 14
+
 USER_EMAIL_MAPPING_FILE = os.path.join(RAW_DATA_DIR, "user_email_mapping.txt")
 
 
@@ -335,18 +337,55 @@ def filter_json_data_to_user_ids(
     participant_ids: set[str],
 ) -> Dict[str, Union[pd.DataFrame, Dict]]:
     """
-    Filter loaded JSON-derived DataFrames to the authoritative participant cohort.
+    Filter loaded JSON-derived data to the authoritative participant cohort.
 
-    Extracted descriptor JSON files usually contain X_PLAYER_ID. Dictionary
-    payloads without a recognized player-id column are left unchanged.
+    Handles:
+    - DataFrames with known player-id columns, e.g. X_PLAYER_ID
+    - per-user dictionary payloads keyed as player_<pid>_* or user_<pid>_*
+    - dictionary payloads that contain nested DataFrames
+
+    Other dictionary payloads are kept unchanged.
     """
+    normalized_participant_ids = {
+        normalized
+        for normalized in (_normalize_user_id(pid) for pid in participant_ids)
+        if normalized is not None
+    }
+
     filtered: Dict[str, Union[pd.DataFrame, Dict]] = {}
 
     for key, value in data.items():
+        key_str = str(key)
+
+        # Case 1: regular DataFrame payload.
         if isinstance(value, pd.DataFrame):
-            filtered[key] = filter_dataframe_to_user_ids(value, participant_ids)
-        else:
-            filtered[key] = value
+            filtered[key] = filter_dataframe_to_user_ids(value, normalized_participant_ids)
+            continue
+
+        # Case 2: per-user JSON payload stored under names such as:
+        # player_454_all_data, user_454_all_data, player_454_day_aggregate, etc.
+        match = re.match(r"^(?:player|user)_(\d+)(?:_|$)", key_str, flags=re.IGNORECASE)
+        if match:
+            pid = _normalize_user_id(match.group(1))
+            if pid in normalized_participant_ids:
+                filtered[key] = value
+            continue
+
+        # Case 3: dictionary containing nested DataFrames.
+        if isinstance(value, dict):
+            nested = {}
+            for nested_key, nested_value in value.items():
+                if isinstance(nested_value, pd.DataFrame):
+                    nested[nested_key] = filter_dataframe_to_user_ids(
+                        nested_value,
+                        normalized_participant_ids,
+                    )
+                else:
+                    nested[nested_key] = nested_value
+            filtered[key] = nested
+            continue
+
+        filtered[key] = value
 
     return filtered
 
@@ -645,6 +684,297 @@ def compute_joining_metrics(
         "metrics": metrics,
         "user_dropout": user_dropout,
     }
+
+
+
+def compute_real_dropout_and_weekly_retention(
+    activities: pd.DataFrame,
+    csv_data: Dict[str, pd.DataFrame],
+    enrolled_user_ids: set,
+    *,
+    active_types: list[str],
+    inactivity_days: int = DROPOUT_INACTIVITY_DAYS,
+) -> dict:
+    """
+    Compute real dropout and weekly retention.
+
+    Definitions:
+    - enrolled user: participant from users.xlsx / resolved participant cohort
+    - qualifying activity: activity whose type is in active_types
+    - never-active: enrolled participant with zero qualifying activities
+    - dropped out: participant with at least one qualifying activity whose last
+      qualifying activity is at least inactivity_days before campaign end
+    - retained/censored: participant with at least one qualifying activity whose
+      dropout cannot be confirmed by campaign end
+
+    Weekly retention:
+    - active_users_count: participants active in that week
+    - retained_users_count: participants who have started and have not crossed
+      the inactivity threshold by the end of that week
+    """
+    if not enrolled_user_ids:
+        enrolled_user_ids = _series_to_id_set(activities["pid"]) if "pid" in activities.columns else set()
+
+    normalized_enrolled_user_ids = set()
+    for pid in enrolled_user_ids:
+        normalized = _normalize_user_id(pid)
+        if normalized is not None:
+            normalized_enrolled_user_ids.add(normalized)
+
+    enrolled_user_ids = normalized_enrolled_user_ids
+
+    total_enrolled = len(enrolled_user_ids)
+
+    empty_result = {
+        "metrics": {
+            "total_enrolled_users": total_enrolled,
+            "joined_users_count": 0,
+            "never_active_users_count": total_enrolled,
+            "dropout_users_count": 0,
+            "retained_or_censored_users_count": 0,
+            "dropout_rate_among_enrolled": 0.0,
+            "dropout_rate_among_joined": 0.0,
+            "retention_rate_among_enrolled": 0.0,
+            "retention_rate_among_joined": 0.0,
+            "inactivity_days_threshold": inactivity_days,
+            "campaign_end_source": "unknown",
+        },
+        "user_dropout": pd.DataFrame(),
+        "weekly_retention": pd.DataFrame(),
+    }
+
+    if activities is None or activities.empty or total_enrolled <= 0:
+        return empty_result
+
+    scoped = filter_activities_by_types(activities, active_types)
+    if scoped.empty:
+        user_dropout = pd.DataFrame(index=pd.Index(sorted(enrolled_user_ids), name="pid"))
+        user_dropout["dropout_status"] = "never_active"
+
+        empty_result["user_dropout"] = user_dropout
+        return empty_result
+
+    scoped = scoped.copy()
+    scoped["pid"] = scoped["pid"].map(_normalize_user_id)
+    scoped = scoped[scoped["pid"].isin(enrolled_user_ids)].copy()
+
+    if scoped.empty:
+        user_dropout = pd.DataFrame(index=pd.Index(sorted(enrolled_user_ids), name="pid"))
+        user_dropout["dropout_status"] = "never_active"
+
+        empty_result["user_dropout"] = user_dropout
+        return empty_result
+
+    scoped["createdAt"] = pd.to_datetime(scoped["createdAt"], errors="coerce", utc=True)
+    scoped = scoped.dropna(subset=["pid", "createdAt"]).copy()
+
+    if scoped.empty:
+        user_dropout = pd.DataFrame(index=pd.Index(sorted(enrolled_user_ids), name="pid"))
+        user_dropout["dropout_status"] = "never_active"
+
+        empty_result["user_dropout"] = user_dropout
+        return empty_result
+
+    scoped["activity_day"] = scoped["createdAt"].dt.tz_convert(None).dt.normalize()
+
+    waves = get_campaign_waves(csv_data)
+    campaign_end_source = "desc_waves" if not waves.empty else "last_activity_fallback"
+
+    campaign_start, campaign_end = _get_campaign_bounds(scoped, csv_data)
+
+    campaign_start = pd.to_datetime(campaign_start, errors="coerce", utc=True)
+    campaign_end = pd.to_datetime(campaign_end, errors="coerce", utc=True)
+
+    if pd.isna(campaign_start):
+        campaign_start = scoped["createdAt"].min()
+    if pd.isna(campaign_end):
+        campaign_end = scoped["createdAt"].max()
+
+    if pd.isna(campaign_start) or pd.isna(campaign_end):
+        return empty_result
+
+    campaign_start_day = campaign_start.tz_convert(None).normalize()
+    campaign_end_day = campaign_end.tz_convert(None).normalize()
+
+    all_users_index = pd.Index(sorted(enrolled_user_ids), name="pid")
+
+    user_activity = (
+        scoped.groupby("pid")
+        .agg(
+            first_activity=("createdAt", "min"),
+            last_activity=("createdAt", "max"),
+            active_days_count=("activity_day", "nunique"),
+            activity_records_count=("createdAt", "size"),
+        )
+    )
+
+    user_dropout = pd.DataFrame(index=all_users_index).join(user_activity)
+
+    user_dropout["has_started"] = user_dropout["first_activity"].notna()
+
+    user_dropout["first_activity_day"] = (
+        pd.to_datetime(user_dropout["first_activity"], errors="coerce", utc=True)
+        .dt.tz_convert(None)
+        .dt.normalize()
+    )
+    user_dropout["last_activity_day"] = (
+        pd.to_datetime(user_dropout["last_activity"], errors="coerce", utc=True)
+        .dt.tz_convert(None)
+        .dt.normalize()
+    )
+
+    user_dropout["days_from_campaign_start_to_first_activity"] = (
+        user_dropout["first_activity_day"] - campaign_start_day
+    ).dt.days
+
+    user_dropout["days_from_first_to_last_activity"] = (
+        user_dropout["last_activity_day"] - user_dropout["first_activity_day"]
+    ).dt.days
+
+    user_dropout["days_since_last_activity_at_campaign_end"] = (
+        campaign_end_day - user_dropout["last_activity_day"]
+    ).dt.days
+
+    user_dropout["dropout_date"] = (
+        user_dropout["last_activity_day"] + pd.to_timedelta(inactivity_days, unit="D")
+    )
+
+    user_dropout["days_until_dropout"] = (
+        user_dropout["dropout_date"] - user_dropout["first_activity_day"]
+    ).dt.days
+
+    user_dropout["is_dropout"] = (
+        user_dropout["has_started"]
+        & (user_dropout["days_since_last_activity_at_campaign_end"] >= inactivity_days)
+    )
+
+    user_dropout["dropout_status"] = "never_active"
+    user_dropout.loc[
+        user_dropout["has_started"] & user_dropout["is_dropout"],
+        "dropout_status",
+    ] = "dropped_out"
+    user_dropout.loc[
+        user_dropout["has_started"] & ~user_dropout["is_dropout"],
+        "dropout_status",
+    ] = "retained_or_censored"
+
+    joined_users_count = int(user_dropout["has_started"].sum())
+    never_active_users_count = int((~user_dropout["has_started"]).sum())
+    dropout_users_count = int(user_dropout["is_dropout"].sum())
+    retained_or_censored_users_count = int(
+        (user_dropout["has_started"] & ~user_dropout["is_dropout"]).sum()
+    )
+
+    dropout_rate_among_enrolled = (
+        dropout_users_count / total_enrolled * 100.0
+        if total_enrolled > 0
+        else 0.0
+    )
+    dropout_rate_among_joined = (
+        dropout_users_count / joined_users_count * 100.0
+        if joined_users_count > 0
+        else 0.0
+    )
+    retention_rate_among_enrolled = (
+        retained_or_censored_users_count / total_enrolled * 100.0
+        if total_enrolled > 0
+        else 0.0
+    )
+    retention_rate_among_joined = (
+        retained_or_censored_users_count / joined_users_count * 100.0
+        if joined_users_count > 0
+        else 0.0
+    )
+
+    # ------------------------------------------------------------------
+    # Weekly retention table
+    # ------------------------------------------------------------------
+    weekly_rows = []
+
+    week_start = campaign_start_day
+    week_number = 1
+
+    while week_start <= campaign_end_day:
+        week_end = min(week_start + pd.Timedelta(days=6), campaign_end_day)
+
+        active_mask = (
+            (scoped["activity_day"] >= week_start)
+            & (scoped["activity_day"] <= week_end)
+        )
+        active_users = set(scoped.loc[active_mask, "pid"].dropna().unique())
+        active_users_count = len(active_users)
+
+        joined_by_week = (
+            user_dropout["has_started"]
+            & user_dropout["first_activity_day"].notna()
+            & (user_dropout["first_activity_day"] <= week_end)
+        )
+
+        retained_by_week = (
+            joined_by_week
+            & user_dropout["dropout_date"].notna()
+            & (user_dropout["dropout_date"] > week_end)
+        )
+
+        joined_by_week_count = int(joined_by_week.sum())
+        retained_users_count = int(retained_by_week.sum())
+        cumulative_dropout_count = int(joined_by_week_count - retained_users_count)
+
+        weekly_rows.append(
+            {
+                "week": week_number,
+                "week_start": week_start.date(),
+                "week_end": week_end.date(),
+                "active_users_count": active_users_count,
+                "active_pct_of_enrolled": (
+                    active_users_count / total_enrolled * 100.0
+                    if total_enrolled > 0
+                    else 0.0
+                ),
+                "joined_by_week_count": joined_by_week_count,
+                "retained_users_count": retained_users_count,
+                "retention_pct_of_enrolled": (
+                    retained_users_count / total_enrolled * 100.0
+                    if total_enrolled > 0
+                    else 0.0
+                ),
+                "retention_pct_of_joined_by_week": (
+                    retained_users_count / joined_by_week_count * 100.0
+                    if joined_by_week_count > 0
+                    else 0.0
+                ),
+                "cumulative_dropout_count": cumulative_dropout_count,
+            }
+        )
+
+        week_start = week_start + pd.Timedelta(days=7)
+        week_number += 1
+
+    weekly_retention = pd.DataFrame(weekly_rows)
+
+    metrics = {
+        "total_enrolled_users": total_enrolled,
+        "joined_users_count": joined_users_count,
+        "never_active_users_count": never_active_users_count,
+        "dropout_users_count": dropout_users_count,
+        "retained_or_censored_users_count": retained_or_censored_users_count,
+        "dropout_rate_among_enrolled": round(dropout_rate_among_enrolled, 2),
+        "dropout_rate_among_joined": round(dropout_rate_among_joined, 2),
+        "retention_rate_among_enrolled": round(retention_rate_among_enrolled, 2),
+        "retention_rate_among_joined": round(retention_rate_among_joined, 2),
+        "inactivity_days_threshold": inactivity_days,
+        "campaign_start": campaign_start_day.date(),
+        "campaign_end": campaign_end_day.date(),
+        "campaign_end_source": campaign_end_source,
+    }
+
+    return {
+        "metrics": metrics,
+        "user_dropout": user_dropout,
+        "weekly_retention": weekly_retention,
+    }
+
+
 
 def _series_to_id_set(series: pd.Series) -> set[str]:
     """

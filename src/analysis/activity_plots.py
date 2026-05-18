@@ -593,8 +593,8 @@ def save_dropout_rates_distribution_plot(user_dropout: pd.DataFrame) -> None:
 
     def plot() -> None:
         sns.histplot(series, kde=True, bins=20, color="tab:blue")
-        plt.title("Distribution of User Dropout (First to Last Activity)")
-        plt.xlabel("Days")
+        plt.title("Distribution of User Activity Span")
+        plt.xlabel("Days between first and last recorded activity")
         plt.ylabel("Number of Users")
 
     create_and_save_figure(
@@ -616,14 +616,110 @@ def save_joining_rates_distribution_plot(user_dropout: pd.DataFrame) -> None:
 
     def plot() -> None:
         sns.histplot(series, kde=True, bins=20, color="tab:red")
-        plt.title("Distribution of User Joining Rates")
-        plt.xlabel("Days Between Campaign Start and First Activity")
+        plt.title("Distribution of User Joining Delay")
+        plt.xlabel("Days between campaign start and first recorded activity")
         plt.ylabel("Number of Users")
 
     create_and_save_figure(
         plot,
         os.path.join(OUTPUT_VISUALIZATIONS_DIR, "joining_rates_distribution.png"),
         figsize=(10, 6),
+    )
+
+
+def save_real_dropout_status_plot(user_dropout: pd.DataFrame) -> None:
+    if user_dropout is None or user_dropout.empty:
+        return
+    if "dropout_status" not in user_dropout.columns:
+        return
+
+    counts = (
+        user_dropout["dropout_status"]
+        .fillna("unknown")
+        .value_counts()
+        .reindex(["never_active", "retained_or_censored", "dropped_out"])
+        .fillna(0)
+        .astype(int)
+    )
+
+    label_map = {
+        "never_active": "Never active",
+        "retained_or_censored": "Retained / censored",
+        "dropped_out": "Dropped out",
+    }
+
+    plot_counts = counts.rename(index=label_map)
+
+    def plot() -> None:
+        plot_counts.plot(kind="bar")
+        plt.title("Participant Dropout Status")
+        plt.xlabel("Status")
+        plt.ylabel("Number of Participants")
+        plt.xticks(rotation=30, ha="right")
+
+        total = int(plot_counts.sum())
+        ax = plt.gca()
+
+        for i, value in enumerate(plot_counts.values):
+            pct = value / total * 100.0 if total > 0 else 0.0
+            ax.text(i, value, f"{value} ({pct:.1f}%)", ha="center", va="bottom")
+
+    create_and_save_figure(
+        plot,
+        os.path.join(OUTPUT_VISUALIZATIONS_DIR, "real_dropout_status.png"),
+        figsize=(10, 6),
+    )
+
+
+def save_weekly_retention_plot(weekly_retention: pd.DataFrame) -> None:
+    if weekly_retention is None or weekly_retention.empty:
+        return
+
+    required = {
+        "week",
+        "active_pct_of_enrolled",
+        "retention_pct_of_enrolled",
+        "retention_pct_of_joined_by_week",
+    }
+    if not required.issubset(weekly_retention.columns):
+        return
+
+    df = weekly_retention.sort_values("week").copy()
+
+    def plot() -> None:
+        plt.plot(
+            df["week"],
+            df["active_pct_of_enrolled"],
+            marker="o",
+            linewidth=2,
+            label="Active this week (% enrolled)",
+        )
+        plt.plot(
+            df["week"],
+            df["retention_pct_of_enrolled"],
+            marker="o",
+            linewidth=2,
+            label="Retained by week end (% enrolled)",
+        )
+        plt.plot(
+            df["week"],
+            df["retention_pct_of_joined_by_week"],
+            marker="o",
+            linewidth=2,
+            label="Retained by week end (% joined by week)",
+        )
+
+        plt.title("Weekly Activity and Retention")
+        plt.xlabel("Campaign week")
+        plt.ylabel("Participants (%)")
+        plt.ylim(0, 105)
+        plt.grid(alpha=0.3, linestyle="--", linewidth=0.5)
+        plt.legend()
+
+    create_and_save_figure(
+        plot,
+        os.path.join(OUTPUT_VISUALIZATIONS_DIR, "weekly_retention.png"),
+        figsize=(12, 6),
     )
 
 
@@ -634,16 +730,26 @@ def save_combined_dropout_joining_rates_plot(user_dropout: pd.DataFrame) -> None
     if not required.issubset(user_dropout.columns):
         return
 
-    dropout_series = user_dropout["dropout_days"].dropna()
+    activity_span_series = user_dropout["dropout_days"].dropna()
     joining_series = user_dropout["joining_days"].dropna()
-    if dropout_series.empty or joining_series.empty:
+    if activity_span_series.empty or joining_series.empty:
         return
 
     def plot() -> None:
         plt.figure(figsize=(12, 7))
-        sns.kdeplot(dropout_series, label="Dropout", fill=True, alpha=0.3, color="blue")
-        sns.kdeplot(joining_series, label="Joining", fill=True, alpha=0.3, color="red")
-        plt.title("Distribution of Dropout vs Joining Rates")
+        sns.kdeplot(
+            activity_span_series,
+            label="Activity span",
+            fill=True,
+            alpha=0.3,
+        )
+        sns.kdeplot(
+            joining_series,
+            label="Joining delay",
+            fill=True,
+            alpha=0.3,
+        )
+        plt.title("Distribution of Activity Span vs Joining Delay")
         plt.xlabel("Days")
         plt.ylabel("Density")
         plt.legend()
@@ -665,8 +771,18 @@ def save_combined_dropout_joining_boxplots_plot(user_dropout: pd.DataFrame) -> N
 
     df_long = pd.concat(
         [
-            pd.DataFrame({"days": user_dropout["dropout_days"], "metric": "Dropout"}),
-            pd.DataFrame({"days": user_dropout["joining_days"], "metric": "Joining"}),
+            pd.DataFrame(
+                {
+                    "days": user_dropout["dropout_days"],
+                    "metric": "Activity span",
+                }
+            ),
+            pd.DataFrame(
+                {
+                    "days": user_dropout["joining_days"],
+                    "metric": "Joining delay",
+                }
+            ),
         ],
         ignore_index=True,
     ).dropna(subset=["days"])
@@ -680,12 +796,11 @@ def save_combined_dropout_joining_boxplots_plot(user_dropout: pd.DataFrame) -> N
             y="days",
             data=df_long,
             hue="metric",
-            palette=["blue", "red"],
             dodge=False,
         )
         if ax.legend_:
             ax.legend_.remove()
-        plt.title("Dropout vs Joining (Boxplots)")
+        plt.title("Activity Span vs Joining Delay")
         plt.xlabel("")
         plt.ylabel("Days")
 

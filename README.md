@@ -1,4 +1,4 @@
-# GameBus Data Analyzer v1.1
+# GameBus Data Analyzer v1.2
 
 A tool for extracting and analyzing health behavior data from the GameBus platform.
 
@@ -7,12 +7,12 @@ A tool for extracting and analyzing health behavior data from the GameBus platfo
 This project extracts user activity data from the GameBus API and performs various analyses to generate insights about user behavior, activity patterns, and engagement.
 The script can technically run on Linux and Mac, but officially we support only Windows.
 
-If new game decriptors were added to GameBus, the list of game descriptors in `\config\settings.py` also needs to be updated. You can also use this list to limit extracted data by commenting out certain game descriptors.
+If new game descriptors were added to GameBus, the list of game descriptors in `\config\settings.py` also needs to be updated. You can also use this list to limit extracted data by commenting out certain game descriptors.
 
 
 ## Quick Start
 
-1. **Install Python** (the script was tested with versions 3.9 & 3.11) and clone this repository
+1. **Install Python**. Recommended: Python 3.11. The script was tested with Python 3.9 and 3.11. Avoid Python 3.14 unless dependencies have been updated, because some pinned scientific packages may not have compatible prebuilt wheels.
 2. **Set up environment**: 
    ```
    python -m venv .venv
@@ -159,8 +159,11 @@ gamebus-data-analyzer/
 ## Outputs and Logs
 
 - Raw API data is saved under `data_raw/` as JSON files (e.g., `player_<id>_<descriptor>.json`) and a combined `player_<id>_all_raw.json` per user.
-- After extraction finishes, a user-email mapping file is written to `data_raw/user_email_mapping.txt`.
+- A user-email mapping file is written to `data_raw/user_email_mapping.txt`.
   - Format: `player_id=<pid> user_id=<uid>: <email>` (if account `user_id` cannot be determined, `-` is used).
+  - This file is normally generated after extraction.
+  - If it is missing at the start of analysis, the analysis pipeline generates it automatically from `config/users.xlsx`.
+  - Analysis uses this mapping to restrict all metrics to the participants listed in `users.xlsx`.
 - Analysis results are saved under `data_analysis/` (e.g., `analysis_report.txt` and generated figures).
 - Logs are written to `logs/data_extraction.log` (extraction) and `logs/data_analysis.log` (analysis).
 - Tip: use `--log-level DEBUG` for more verbose output when running `pipeline.py`.
@@ -190,17 +193,31 @@ Running `python -m src.analysis.data_analysis` or `python pipeline.py --analyze`
   - Points by activity type per wave → `wave_points_by_activity_type.png`
 
 **Campaign metrics & participation**
-- Active vs Passive players (by rewarded tasks) → `player_active_vs_passive_pie.png`
+
+- Active vs passive participants are calculated descriptor-based, using only participants listed in `config/users.xlsx`.
+- Separate scoped active/passive pie charts are generated:
+  - GameBus → `player_active_vs_passive_pie_gamebus.png`
+  - Nutrida → `player_active_vs_passive_pie_nutrida.png`
+  - Combined → `player_active_vs_passive_pie_combined.png`
+- A legacy reward-based active/passive count is still included in the text reports for comparison.
 
 - Churn:
   - Churn counts over time → `churn_counts_over_time.png`
   - Churn rate over time → `churn_rate_over_time.png`
 
-- **Drop-out & joining**
-- Drop-out histogram (first → last activity, days) → `dropout_rates_distribution.png`
-- Joining histogram (campaign start → first activity, days) → `joining_rates_distribution.png`
-- Combined KDE (drop-out vs joining) → `combined_dropout_joining_rates.png`
-- Combined boxplots (drop-out vs joining) → `combined_dropout_joining_boxplots.png`
+- **Real dropout, weekly retention, activity span, and joining**
+  - Real dropout status → `real_dropout_status.png`
+  - Weekly activity and retention → `weekly_retention.png`
+  - Activity-span histogram, defined as first recorded activity → last recorded activity → `dropout_rates_distribution.png`
+  - Joining-delay histogram, defined as first wave start → first qualifying activity → `joining_rates_distribution.png`
+  - Combined KDE of activity span vs joining delay → `combined_dropout_joining_rates.png`
+  - Combined boxplots of activity span vs joining delay → `combined_dropout_joining_boxplots.png`
+
+Important terminology:
+
+- “Activity span” is the number of days between a participant’s first and last recorded activity. It is not a dropout rate by itself.
+- “Real dropout” uses an inactivity threshold and the campaign wave end date.
+- “Weekly retention” reports participants who have started and have not crossed the inactivity threshold by the end of each week.
 
 **Challenges / Tasks (from `config/campaign_desc.xlsx`: sheets `visualizations`, `challenges`, `tasks`)**
 - Activity completion by type → `activity_completion.png`
@@ -254,14 +271,17 @@ GAMEBUS_API_KEY=your_api_key_here
 Create a `users.xlsx` file in the config directory with the following format:
 
 ```
-email               | password      | UserID (optional)
----------------------|--------------|----------------
-user@example.com     | password123  | 12345
+email               | password
+--------------------|--------------
+user@example.com    | password123
 ```
 
 Requirements:
-- Must include header row with exact column names: `email` and `password` (lowercase)
-- Note: You can use the Excel file with users generated for GameBus campaigns without any modifications
+- Must include header row with exact column names: `email` and `password` (lowercase).
+- Do not add `pid` or `player_id`; the tool resolves player IDs automatically.
+- You can use the Excel file with users generated for GameBus campaigns without modifications.
+- During analysis, this file defines the participant cohort. Users not listed here are excluded from analysis even if they appear in campaign exports.
+
 
 ### Campaign Data
 
@@ -277,6 +297,35 @@ For analysis functionality, copy these files from the GameBus Campaigns website:
 
 The `settings.py` file contains a list of valid game descriptors that the system will extract data for. You can modify this list to focus on specific types of activities.
 
+
+## Analysis Cohort and Participant Filtering
+
+For analysis, `config/users.xlsx` is the authoritative participant roster.
+
+This means:
+
+- Only users listed in `config/users.xlsx` are included in participant counts, activity metrics, active/passive classification, dropout/retention metrics, plots, and reports.
+- Test accounts or extra users that appear in `campaign_data.zip` are excluded from analysis if they are not listed in `users.xlsx`.
+- `users.xlsx` does **not** need to contain `pid`, `player_id`, or GameBus internal IDs. It only needs participant emails and passwords.
+- The tool resolves participant emails to GameBus player IDs through `data_raw/user_email_mapping.txt`.
+
+If `data_raw/user_email_mapping.txt` is missing or empty at the start of analysis, the analysis pipeline automatically generates it from `config/users.xlsx`. Therefore, `python pipeline.py --analyze` can still work as long as the API key and user credentials are available.
+
+If a user in `users.xlsx` cannot be resolved to a GameBus player ID, analysis stops instead of silently including campaign/test accounts.
+
+## Campaign Dates, Waves, and Analysis Window
+
+The analysis window for joining, dropout, and weekly retention is taken from the campaign description file.
+
+Specifically:
+
+- analysis start = first day of the first wave in `campaign_desc.xlsx`
+- analysis end = last day of the last wave in `campaign_desc.xlsx`
+
+If the reported analysis period is wrong, edit the wave dates in `campaign_desc.xlsx`. Do not fix this in code or by changing configuration constants.
+
+This is important because weekly retention and joining delay depend directly on the wave dates. For example, if the first wave starts months before the actual pilot started, the report will correctly show a long joining delay based on that Excel configuration.
+
 ## Troubleshooting
 
 ### Common Issues
@@ -290,8 +339,11 @@ The `settings.py` file contains a list of valid game descriptors that the system
    - Check that campaign files are correctly formatted and in the right location
 
 3. **Analysis Errors**:
-   - Ensure both campaign files are present and properly formatted
-   - Check that raw data has been extracted before running analysis
+   - Ensure both campaign files are present and properly formatted.
+   - Ensure `config/users.xlsx` contains valid participant emails and passwords.
+   - If `data_raw/user_email_mapping.txt` is missing, analysis will try to generate it automatically. This requires a valid API key and valid user credentials.
+   - If analysis stops because some emails cannot be resolved to player IDs, verify that those users exist in GameBus and that their credentials are correct.
+   - If the reported analysis window or joining delay looks wrong, check the wave start/end dates in `config/campaign_desc.xlsx`.
 
 ### Performance Tips
 
@@ -330,6 +382,21 @@ Example to override in code (optional per script):
   - Or change BAR_COLORMAP/SEQUENTIAL_HEATMAP_COLORMAP constants in data_analysis.py.
 
 ## Change Log
+- 1.2 (2026-05-18):
+  - Participant filtering now uses `config/users.xlsx` as the authoritative analysis cohort.
+    - Test accounts and campaign users not listed in `users.xlsx` are excluded from analysis.
+    - `data_raw/user_email_mapping.txt` is generated automatically at analysis start if missing.
+    - Active/passive metrics are now descriptor-based for GameBus, Nutrida, and Combined scopes.
+    - Added scoped active/passive pie charts:
+      - `player_active_vs_passive_pie_gamebus.png`
+      - `player_active_vs_passive_pie_nutrida.png`
+      - `player_active_vs_passive_pie_combined.png`
+    - Fixed active/passive pie chart legend layout.
+    - Added real dropout and weekly retention metrics.
+    - Renamed old dropout-style metrics to activity-span metrics where appropriate.
+    - Clarified that campaign wave dates from `campaign_desc.xlsx` define the retention/dropout analysis window.
+    - Added standard deviations to usage summary metrics.
+    - 
 - 1.1 (2025-12-03): Analysis, visualization, and logging improvements
   - New analyses using rewardedParticipations:
     - Group by Challenge name and by Rule name with figures:

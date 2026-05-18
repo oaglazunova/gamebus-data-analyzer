@@ -214,13 +214,14 @@ def create_and_save_figure(
         _apply_label_truncation(fig, LABEL_MAX_CHARS)
 
     try:
-        if bottom_adjust is not None:
-            fig.subplots_adjust(bottom=bottom_adjust)
+        fig.tight_layout()
     except Exception:
         pass
 
+    # Apply manual spacing after tight_layout, so tight_layout does not undo it.
     try:
-        fig.tight_layout()
+        if bottom_adjust is not None:
+            fig.subplots_adjust(bottom=bottom_adjust)
     except Exception:
         pass
 

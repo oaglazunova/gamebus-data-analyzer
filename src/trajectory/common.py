@@ -43,6 +43,18 @@ class TrajectoryAuditConfig:
         "trajectory_audit",
     )
 
+    episode_gap_days: int = 14
+
+    observation_start_grace_days: int = 14
+
+    # Optional manual override.
+    # Example:
+    # analysis_cutoff = "2026-09-11"
+    #
+    # None means:
+    # use the latest trustworthy observed event date.
+    analysis_cutoff: str | None = None
+
 
 def jsonable(value: Any) -> Any:
     """

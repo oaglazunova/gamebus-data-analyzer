@@ -408,8 +408,8 @@ def _normalize_activities(
 
         deleted = (
             df["isDeleted"]
-            .fillna(False)
-            .astype(str)
+            .astype("string")
+            .fillna("false")
             .str.lower()
             .isin(
                 [

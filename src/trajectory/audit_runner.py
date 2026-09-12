@@ -5,6 +5,8 @@ import warnings
 import argparse
 import hashlib
 
+import pandas as pd
+
 from typing import Any, Dict
 from datetime import datetime, timezone
 
@@ -44,6 +46,9 @@ from src.trajectory.candidate_patterns import (
 )
 from src.trajectory.case_export import (
     run_case_export,
+)
+from src.trajectory.engagement import (
+    explicit_engagement_mask,
 )
 
 
@@ -300,6 +305,394 @@ def _write_audit_manifest(
 
 
 
+def _build_audit_summary(
+    results: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Build a compact cross-campaign summary from
+    the completed trajectory-audit outputs.
+
+    This file is intended for robustness testing
+    and comparison across historical campaigns.
+    """
+
+    events = results[
+        "normalized_events"
+    ]
+
+    episodes_result = results[
+        "participation_episodes"
+    ]
+
+    # participation_episode_builder currently returns
+    # (explicit_engagement_events, episodes).
+    if isinstance(
+            episodes_result,
+            tuple,
+    ):
+        _, episodes = (
+            episodes_result
+        )
+    else:
+        episodes = (
+            episodes_result
+        )
+
+    explicit_event_count = int(
+        explicit_engagement_mask(
+            events
+        ).sum()
+    )
+
+    state = results[
+        "participant_state_daily"
+    ]
+
+    gaps = results[
+        "inactivity_gaps"
+    ]
+
+    transitions = results[
+        "at_risk_transitions"
+    ]
+
+    domain_tool = results[
+        "domain_tool_engagement"
+    ]
+
+    quality_result = results[
+        "data_quality"
+    ]
+
+    if isinstance(
+        quality_result,
+        tuple,
+    ):
+        quality, quality_summary = (
+            quality_result
+        )
+    else:
+        quality = quality_result
+        quality_summary = {}
+
+    patterns = results[
+        "candidate_patterns"
+    ]
+
+    cases = results[
+        "case_export"
+    ]
+
+    # -------------------------------------------------
+    # Cohort
+    # -------------------------------------------------
+
+    cohort_size = (
+        int(
+            quality[
+                "participant_id"
+            ].nunique()
+        )
+        if not quality.empty
+        else 0
+    )
+
+    explicit_participants = (
+        int(
+            quality.loc[
+                quality[
+                    "has_explicit_engagement"
+                ],
+                "participant_id",
+            ].nunique()
+        )
+        if (
+            not quality.empty
+            and "has_explicit_engagement"
+            in quality.columns
+        )
+        else 0
+    )
+
+    # -------------------------------------------------
+    # State at cutoff
+    # -------------------------------------------------
+
+    cutoff_states = {}
+
+    if not state.empty:
+
+        state_dates = pd.to_datetime(
+            state[
+                "date"
+            ],
+            errors="coerce",
+        )
+
+        cutoff = (
+            state_dates.max()
+        )
+
+        cutoff_rows = state.loc[
+            state_dates
+            == cutoff
+        ]
+
+        cutoff_states = {
+            str(name): int(
+                count
+            )
+            for name, count
+            in cutoff_rows[
+                "engagement_state"
+            ]
+            .value_counts(
+                dropna=False
+            )
+            .items()
+        }
+
+    # -------------------------------------------------
+    # Gap thresholds
+    # -------------------------------------------------
+
+    gap_thresholds = {}
+
+    if not gaps.empty:
+
+        for threshold in (
+            7,
+            14,
+            21,
+        ):
+
+            column = (
+                f"reached_{threshold}d"
+            )
+
+            reached = gaps.loc[
+                gaps[
+                    column
+                ]
+            ]
+
+            gap_thresholds[
+                str(threshold)
+            ] = {
+                "gaps": int(
+                    len(
+                        reached
+                    )
+                ),
+
+                "observed_reengagements": int(
+                    reached[
+                        "reengaged"
+                    ].sum()
+                ),
+
+                "right_censored": int(
+                    reached[
+                        "right_censored"
+                    ].sum()
+                ),
+            }
+
+    # -------------------------------------------------
+    # Candidate patterns
+    # -------------------------------------------------
+
+    pattern_counts = {}
+
+    if not patterns.empty:
+
+        pattern_counts = {
+            str(name): int(
+                count
+            )
+            for name, count
+            in patterns[
+                "pattern_type"
+            ]
+            .value_counts()
+            .items()
+        }
+
+    # -------------------------------------------------
+    # Domain mapping
+    # -------------------------------------------------
+
+    unique_activity_events = (
+        int(
+            domain_tool[
+                "event_id"
+            ].nunique()
+        )
+        if not domain_tool.empty
+        else 0
+    )
+
+    unmapped_activity_events = (
+        int(
+            domain_tool.loc[
+                domain_tool[
+                    "domain"
+                ]
+                == "unmapped",
+                "event_id",
+            ].nunique()
+        )
+        if not domain_tool.empty
+        else 0
+    )
+
+    multi_domain_events = (
+        int(
+            domain_tool.loc[
+                domain_tool[
+                    "domain_membership_count"
+                ]
+                > 1,
+                "event_id",
+            ].nunique()
+        )
+        if not domain_tool.empty
+        else 0
+    )
+
+    # -------------------------------------------------
+    # Final compact summary
+    # -------------------------------------------------
+
+    return {
+        "cohort": {
+            "participants": (
+                cohort_size
+            ),
+
+            "participants_with_explicit_engagement": (
+                explicit_participants
+            ),
+
+            "participants_without_explicit_engagement": (
+                cohort_size
+                - explicit_participants
+            ),
+        },
+
+        "events": {
+            "normalized_events": int(
+                len(
+                    events
+                )
+            ),
+
+            "explicit_engagement_events": (
+                explicit_event_count
+            ),
+        },
+
+        "episodes": {
+            "participation_episodes": int(
+                len(
+                    episodes
+                )
+            ),
+        },
+
+        "state_at_cutoff": (
+            cutoff_states
+        ),
+
+        "inactivity_gaps": {
+            "total": int(
+                len(
+                    gaps
+                )
+            ),
+
+            "closed_with_reengagement": (
+                int(
+                    gaps[
+                        "reengaged"
+                    ].sum()
+                )
+                if not gaps.empty
+                else 0
+            ),
+
+            "right_censored": (
+                int(
+                    gaps[
+                        "right_censored"
+                    ].sum()
+                )
+                if not gaps.empty
+                else 0
+            ),
+
+            "thresholds": (
+                gap_thresholds
+            ),
+        },
+
+        "threshold_signals": {
+            "total": int(
+                len(
+                    transitions
+                )
+            ),
+        },
+
+        "domain_mapping": {
+            "activity_events": (
+                unique_activity_events
+            ),
+
+            "unmapped_activity_events": (
+                unmapped_activity_events
+            ),
+
+            "multi_domain_activity_events": (
+                multi_domain_events
+            ),
+        },
+
+        "candidate_patterns": {
+            "rows": int(
+                len(
+                    patterns
+                )
+            ),
+
+            "participants": (
+                int(
+                    patterns[
+                        "participant_id"
+                    ].nunique()
+                )
+                if not patterns.empty
+                else 0
+            ),
+
+            "by_type": (
+                pattern_counts
+            ),
+        },
+
+        "case_export": {
+            "cases": int(
+                len(
+                    cases
+                )
+            ),
+        },
+
+        "data_quality": (
+            quality_summary
+        ),
+    }
+
 
 
 def run_trajectory_audit(
@@ -539,6 +932,31 @@ def run_trajectory_audit(
 
     print()
     print(
+        "Writing audit summary"
+    )
+
+    audit_summary = (
+        _build_audit_summary(
+            results
+        )
+    )
+
+    summary_path = os.path.join(
+        config.output_dir,
+        "audit_summary.json",
+    )
+
+    write_json(
+        summary_path,
+        audit_summary,
+    )
+
+    results[
+        "audit_summary"
+    ] = audit_summary
+
+    print()
+    print(
         "Writing audit manifest"
     )
 
@@ -579,6 +997,16 @@ def run_trajectory_audit(
 
     print(
         manifest_path
+    )
+
+    print()
+
+    print(
+        "Summary:"
+    )
+
+    print(
+        summary_path
     )
 
     return results

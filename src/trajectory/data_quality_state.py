@@ -108,10 +108,15 @@ def _credential_extraction_state(
     config: TrajectoryAuditConfig,
 ) -> str:
     """
-    Check whether participant-specific extracted JSON
-    already exists.
+    Report whether raw credential-based extraction
+    files are present.
 
-    This does NOT authenticate or use users.xlsx.
+    At this stage the Trajectory Audit does not
+    establish that those files correspond to the
+    current campaign/cohort.
+
+    Therefore presence is reported as
+    'present_unscoped', not 'available'.
     """
 
     files = glob.glob(
@@ -122,7 +127,7 @@ def _credential_extraction_state(
     )
 
     return (
-        "available"
+        "present_unscoped"
         if files
         else "unavailable"
     )

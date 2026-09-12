@@ -4,7 +4,7 @@ import json
 import os
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, Tuple
 
 import pandas as pd
@@ -55,13 +55,44 @@ class TrajectoryAuditConfig:
     # use the latest trustworthy observed event date.
     analysis_cutoff: str | None = None
 
+    # Candidate-pattern windows.
+    #
+    # "Recent" means the final 28 observed days.
+    # "Reference" means the 28 days immediately
+    # preceding the recent window.
+    pattern_recent_window_days: int = 28
+    pattern_reference_window_days: int = 28
+
+    # Avoid declaring a decline/disappearance based on
+    # one isolated historical event.
+    pattern_min_reference_events: int = 2
+
+    # A recent explicit-engagement count <= 50% of the
+    # preceding reference period is a candidate decline.
+    # This is exploratory, not a validated risk threshold.
+    pattern_decline_ratio: float = 0.5
+
+    # Repeated long-gap candidate.
+    pattern_repeated_gap_count: int = 2
+
+    # Maximum number of compact participant cases
+    # exported by the Trajectory Audit.
+    case_export_max_cases: int = 10
+
 
 def jsonable(value: Any) -> Any:
     """
     Convert pandas/numpy/date values into values that json.dump can serialize.
     """
 
-    if isinstance(value, (pd.Timestamp, datetime)):
+    if isinstance(
+            value,
+            (
+                    pd.Timestamp,
+                    datetime,
+                    date,
+            ),
+    ):
         if pd.isna(value):
             return None
         return value.isoformat()

@@ -32,8 +32,8 @@ from src.trajectory.participant_state_daily import (
 from src.trajectory.inactivity_gap_analysis import (
     run_inactivity_gap_analysis,
 )
-from src.trajectory.at_risk_transition_analysis import (
-    run_at_risk_transition_analysis,
+from src.trajectory.inactivity_threshold_analysis import (
+    run_inactivity_threshold_analysis,
 )
 from src.trajectory.domain_tool_engagement import (
     run_domain_tool_engagement,
@@ -353,7 +353,7 @@ def _build_audit_summary(
     ]
 
     transitions = results[
-        "at_risk_transitions"
+        "inactivity_threshold_transitions"
     ]
 
     domain_tool = results[
@@ -412,6 +412,41 @@ def _build_audit_summary(
             in quality.columns
         )
         else 0
+    )
+
+    # -------------------------------------------------
+    # Observed cohort evidence
+    # -------------------------------------------------
+
+    observed_participants = (
+        int(
+            events[
+                "participant_id"
+            ]
+            .dropna()
+            .nunique()
+        )
+        if (
+            not events.empty
+            and "participant_id"
+            in events.columns
+        )
+        else 0
+    )
+
+    participants_without_events = (
+        max(
+            cohort_size
+            - observed_participants,
+            0,
+        )
+    )
+
+    observed_participant_coverage = (
+        observed_participants
+        / cohort_size
+        if cohort_size > 0
+        else None
     )
 
     # -------------------------------------------------
@@ -565,9 +600,21 @@ def _build_audit_summary(
     # -------------------------------------------------
 
     return {
-        "cohort": {
+                "cohort": {
             "participants": (
                 cohort_size
+            ),
+
+            "participants_with_any_observed_event": (
+                observed_participants
+            ),
+
+            "participants_without_observed_events": (
+                participants_without_events
+            ),
+
+            "observed_participant_coverage": (
+                observed_participant_coverage
             ),
 
             "participants_with_explicit_engagement": (
@@ -577,6 +624,10 @@ def _build_audit_summary(
             "participants_without_explicit_engagement": (
                 cohort_size
                 - explicit_participants
+            ),
+
+            "cohort_membership_evidence": (
+                "campaign_export_only"
             ),
         },
 
@@ -863,9 +914,9 @@ def run_trajectory_audit(
     )
 
     results[
-        "at_risk_transitions"
+        "inactivity_threshold_transitions"
     ] = (
-        run_at_risk_transition_analysis(
+        run_inactivity_threshold_analysis(
             config
         )
     )

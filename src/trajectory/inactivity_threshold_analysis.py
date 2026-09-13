@@ -86,7 +86,7 @@ def _transition_outcome(
     return "unknown"
 
 
-def build_at_risk_transitions(
+def build_inactivity_threshold_transitions(
     config: TrajectoryAuditConfig,
     gaps: pd.DataFrame,
 ) -> pd.DataFrame:
@@ -378,11 +378,11 @@ def build_at_risk_transitions(
     ]
 
 
-def run_at_risk_transition_analysis(
+def run_inactivity_threshold_analysis(
     config: TrajectoryAuditConfig | None = None,
 ) -> pd.DataFrame:
     """
-    Build and save at_risk_transitions.csv.
+    Build and save inactivity_threshold_transitions.csv.
     """
 
     config = (
@@ -423,7 +423,7 @@ def run_at_risk_transition_analysis(
         )
 
         transitions = (
-            build_at_risk_transitions(
+            build_inactivity_threshold_transitions(
                 config,
                 gaps,
             )
@@ -436,7 +436,7 @@ def run_at_risk_transition_analysis(
 
     output_path = os.path.join(
         config.output_dir,
-        "at_risk_transitions.csv",
+        "inactivity_threshold_transitions.csv",
     )
 
     transitions.to_csv(
@@ -450,11 +450,11 @@ def run_at_risk_transition_analysis(
 if __name__ == "__main__":
 
     transitions = (
-        run_at_risk_transition_analysis()
+        run_inactivity_threshold_analysis()
     )
 
     print(
-        "At-risk transition analysis "
+        "Inactivity threshold analysis "
         "written successfully."
     )
 

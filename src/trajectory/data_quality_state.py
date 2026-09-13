@@ -347,16 +347,26 @@ def _participant_observation_flags(
 def _core_quality_state(
     activity_stream_state: str,
     cohort_available: bool,
+    has_any_event: bool,
     quality_flags: List[str],
 ) -> str:
     """
-    Determine whether the participant evidence is
-    sufficient for core engagement trajectory analysis.
+    Determine the status of participant-level
+    trajectory evidence.
+
+    Distinguish between:
+
+    - insufficient source data;
+    - no observed trajectory;
+    - observed trajectory with quality cautions;
+    - observed trajectory with sufficient core data.
 
     Optional enrichment streams are deliberately
     NOT used to downgrade this status.
     """
 
+    # The source data themselves are insufficient
+    # to support core trajectory reconstruction.
     if (
         activity_stream_state
         == "unavailable"
@@ -365,6 +375,19 @@ def _core_quality_state(
 
         return (
             "insufficient_for_core_trajectory"
+        )
+
+    # The campaign data are available, but this
+    # participant has no observed events.
+    #
+    # This is intentionally NOT called insufficient:
+    # absence of observations may reflect true
+    # non-participation, pre-created accounts,
+    # uncertain enrollment, or another cohort issue.
+    if not has_any_event:
+
+        return (
+            "no_observed_trajectory"
         )
 
     if quality_flags:
@@ -657,6 +680,9 @@ def build_data_quality_state(
                     _core_quality_state(
                         activity_state,
                         cohort_available,
+                        counts[
+                            "total_events"
+                        ] > 0,
                         quality_flags,
                     )
                 ),
@@ -835,11 +861,120 @@ def build_data_quality_state(
             "credential_extraction"
         )
 
+    # -------------------------------------------------
+    # Cohort evidence
+    # -------------------------------------------------
+
+    cohort_size = int(
+        len(
+            participant_ids
+        )
+    )
+
+    if not quality.empty:
+
+        observed_participants = int(
+            quality[
+                "has_any_event"
+            ]
+            .fillna(False)
+            .astype(bool)
+            .sum()
+        )
+
+        explicit_participants = int(
+            quality[
+                "has_explicit_engagement"
+            ]
+            .fillna(False)
+            .astype(bool)
+            .sum()
+        )
+
+    else:
+
+        observed_participants = 0
+        explicit_participants = 0
+
+    participants_without_events = max(
+        cohort_size
+        - observed_participants,
+        0,
+    )
+
+    participants_without_explicit = max(
+        cohort_size
+        - explicit_participants,
+        0,
+    )
+
+    observed_participant_coverage = (
+        observed_participants
+        / cohort_size
+        if cohort_size > 0
+        else None
+    )
+
+    cohort_source = (
+        cohort["source"]
+    )
+
+    if (
+        cohort_source
+        == "campaign_export"
+    ):
+
+        cohort_membership_evidence = (
+            "campaign_export_only"
+        )
+
+    elif (
+        cohort_source
+        == "observed_events"
+    ):
+
+        cohort_membership_evidence = (
+            "observed_events_only"
+        )
+
+    else:
+
+        cohort_membership_evidence = (
+            "unavailable"
+        )
+
     summary: Dict[str, Any] = {
-        "cohort": {
-            "source": cohort["source"],
-            "participants": int(
-                len(participant_ids)
+                "cohort": {
+            "source": (
+                cohort_source
+            ),
+
+            "participants": (
+                cohort_size
+            ),
+
+            "participants_with_any_observed_event": (
+                observed_participants
+            ),
+
+            "participants_without_observed_events": (
+                participants_without_events
+            ),
+
+            "observed_participant_coverage": (
+                observed_participant_coverage
+            ),
+
+            "participants_with_explicit_engagement": (
+                explicit_participants
+            ),
+
+            "participants_without_explicit_engagement": (
+                participants_without_explicit
+            ),
+
+            "cohort_membership_evidence": (
+                cohort_membership_evidence
             ),
         },
 
@@ -950,6 +1085,15 @@ def build_data_quality_state(
                 "No explicit engagement is an "
                 "observation, not automatically a "
                 "data-quality problem."
+            ),
+
+            "cohort_membership_rule": (
+                "Membership in the campaign export "
+                "is treated as nominal campaign "
+                "membership and does not independently "
+                "establish study enrollment. "
+                "Observed-event coverage is reported "
+                "separately."
             ),
         },
     }

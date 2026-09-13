@@ -1480,7 +1480,7 @@ def _plot_cohort_engagement(
     )
 
     state_order = [
-        "not_yet_engaged",
+        "no_explicit_engagement_observed_yet",
         "active",
         "quiet",
         "prolonged_inactivity_7d",

@@ -489,7 +489,7 @@ def _add_engagement_state(
     # -------------------------------------------------
 
     result["engagement_state"] = (
-        "not_yet_engaged"
+        "no_explicit_engagement_observed_yet"
     )
 
     active = (

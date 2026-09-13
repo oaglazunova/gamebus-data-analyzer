@@ -54,3 +54,4 @@ logs/
 .vscode/
 *.swp
 *.swo
+/config/**/*.zip

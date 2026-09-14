@@ -3,12 +3,13 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
-
 from openpyxl import Workbook
+from io import BytesIO
 
 from src.acquisition.participant_credentials import (
     build_initial_cohort_candidates,
     load_participant_credentials,
+    load_participant_credentials_bytes,
 )
 
 
@@ -320,6 +321,62 @@ class TestParticipantCredentials(
                     path
                 )
 
+
+    def test_credentials_can_be_loaded_from_bytes(
+        self,
+    ) -> None:
+        workbook = Workbook()
+
+        sheet = workbook.active
+
+        sheet.append(
+            [
+                "email",
+                "password",
+                "Device ID",
+            ]
+        )
+
+        sheet.append(
+            [
+                "a@example.org",
+                "secret-a",
+                "device-1",
+            ]
+        )
+
+        buffer = BytesIO()
+
+        workbook.save(
+            buffer
+        )
+
+        workbook.close()
+
+        credentials = (
+            load_participant_credentials_bytes(
+                buffer.getvalue(),
+                source_filename=(
+                    "HW8 BIPS - users-456.xlsx"
+                ),
+            )
+        )
+
+        self.assertEqual(
+            credentials.count,
+            1,
+        )
+
+        self.assertTrue(
+            credentials.has_email(
+                "a@example.org"
+            )
+        )
+
+        self.assertEqual(
+            credentials.source_filename,
+            "HW8 BIPS - users-456.xlsx",
+        )
 
 if __name__ == "__main__":
     unittest.main()

@@ -57,22 +57,40 @@ def _participant_id(
     if value is None:
         return None
 
-    if isinstance(value, int):
-        return str(value)
+    if isinstance(
+        value,
+        int,
+    ):
+        return str(
+            value
+        )
 
-    if isinstance(value, float):
+    if isinstance(
+        value,
+        float,
+    ):
         if value.is_integer():
-            return str(int(value))
+            return str(
+                int(
+                    value
+                )
+            )
 
-        return str(value)
+        return str(
+            value
+        )
 
-    text = str(value).strip()
+    text = str(
+        value
+    ).strip()
 
     if not text:
         return None
 
     if (
-        text.endswith(".0")
+        text.endswith(
+            ".0"
+        )
         and text[:-2].isdigit()
     ):
         return text[:-2]
@@ -88,14 +106,27 @@ def _check_for_sensitive_fields(
     Prevent participant passwords from accidentally being
     persisted in dataset manifests.
     """
-    if isinstance(value, dict):
+    if isinstance(
+        value,
+        dict,
+    ):
         for key, child in value.items():
-            key_text = str(key).strip().lower()
+            key_text = (
+                str(
+                    key
+                )
+                .strip()
+                .lower()
+            )
 
-            if key_text in _SENSITIVE_FIELD_NAMES:
+            if (
+                key_text
+                in _SENSITIVE_FIELD_NAMES
+            ):
                 raise ValueError(
                     "Sensitive credential field cannot "
-                    f"be stored in manifest: {path}.{key}"
+                    "be stored in manifest: "
+                    f"{path}.{key}"
                 )
 
             _check_for_sensitive_fields(
@@ -103,8 +134,13 @@ def _check_for_sensitive_fields(
                 f"{path}.{key}",
             )
 
-    elif isinstance(value, list):
-        for index, child in enumerate(value):
+    elif isinstance(
+        value,
+        list,
+    ):
+        for index, child in enumerate(
+            value
+        ):
             _check_for_sensitive_fields(
                 child,
                 f"{path}[{index}]",
@@ -115,7 +151,9 @@ def build_cohort_manifest(
     *,
     campaign_abbreviation: str,
     campaign_id: int | str,
-    participants: Iterable[dict[str, Any]],
+    participants: Iterable[
+        dict[str, Any]
+    ],
     verified_at: datetime | None = None,
     candidate_source: str = "campaign_export",
 ) -> dict[str, Any]:
@@ -131,6 +169,12 @@ def build_cohort_manifest(
         selected_for_participant_extraction
         participant_data_extracted
 
+    Analysis selection and acquisition history are separate.
+
+    A participant may therefore later be excluded from
+    analysis even when participant-level data were previously
+    selected for extraction or successfully extracted.
+
     Passwords must never be passed or persisted.
     """
     normalized_participants: list[
@@ -144,14 +188,21 @@ def build_cohort_manifest(
         )
 
         pid = _participant_id(
-            participant.get("pid")
+            participant.get(
+                "pid"
+            )
         )
 
         email = _optional_text(
-            participant.get("email")
+            participant.get(
+                "email"
+            )
         )
 
-        if pid is None and email is None:
+        if (
+            pid is None
+            and email is None
+        ):
             raise ValueError(
                 "Each participant must have at least "
                 "a PID or email."
@@ -185,16 +236,14 @@ def build_cohort_manifest(
             )
         )
 
-        if (
-            selected_for_extraction
-            and not selected_for_analysis
-        ):
-            raise ValueError(
-                "A participant cannot be selected for "
-                "participant-level extraction while "
-                "excluded from the analysis cohort."
-            )
-
+        # Extraction still requires credentials.
+        #
+        # We deliberately DO NOT require
+        # selected_for_analysis=True here.
+        #
+        # Analysis selection may be changed later without
+        # erasing the historical fact that participant-level
+        # data were selected for or completed extraction.
         if (
             selected_for_extraction
             and not credentials_available
@@ -217,8 +266,12 @@ def build_cohort_manifest(
 
         normalized_participants.append(
             {
-                "pid": pid,
-                "email": email,
+                "pid": (
+                    pid
+                ),
+                "email": (
+                    email
+                ),
                 "selected_for_analysis": (
                     selected_for_analysis
                 ),
@@ -236,15 +289,29 @@ def build_cohort_manifest(
 
     selected_analysis = sum(
         1
-        for participant in normalized_participants
+        for participant in (
+            normalized_participants
+        )
         if participant[
             "selected_for_analysis"
         ]
     )
 
+    credentials_count = sum(
+        1
+        for participant in (
+            normalized_participants
+        )
+        if participant[
+            "credentials_available"
+        ]
+    )
+
     selected_extraction = sum(
         1
-        for participant in normalized_participants
+        for participant in (
+            normalized_participants
+        )
         if participant[
             "selected_for_participant_extraction"
         ]
@@ -252,7 +319,9 @@ def build_cohort_manifest(
 
     extracted_count = sum(
         1
-        for participant in normalized_participants
+        for participant in (
+            normalized_participants
+        )
         if participant[
             "participant_data_extracted"
         ]
@@ -268,13 +337,17 @@ def build_cohort_manifest(
                     campaign_abbreviation
                 ).strip()
             ),
-            "id": str(
-                campaign_id
-            ).strip(),
+            "id": (
+                str(
+                    campaign_id
+                ).strip()
+            ),
         },
         "verification": {
-            "verified_at": _timestamp(
-                verified_at
+            "verified_at": (
+                _timestamp(
+                    verified_at
+                )
             ),
             "method": (
                 "manual_verification"
@@ -284,11 +357,16 @@ def build_cohort_manifest(
             ),
         },
         "counts": {
-            "accounts_available": len(
-                normalized_participants
+            "accounts_available": (
+                len(
+                    normalized_participants
+                )
             ),
             "selected_for_analysis": (
                 selected_analysis
+            ),
+            "credentials_available": (
+                credentials_count
             ),
             "selected_for_participant_extraction": (
                 selected_extraction
@@ -314,10 +392,16 @@ def build_extraction_manifest(
     campaign_abbreviation: str,
     campaign_id: int | str,
     extracted_at: datetime | None = None,
-    campaign_data_filename: str | None = None,
-    campaign_description_filename: str | None = None,
+    campaign_data_filename: (
+        str | None
+    ) = None,
+    campaign_description_filename: (
+        str | None
+    ) = None,
     credentials_supplied: bool = False,
-    credentials_source_filename: str | None = None,
+    credentials_source_filename: (
+        str | None
+    ) = None,
 ) -> dict[str, Any]:
     """
     Build metadata describing how a dataset was acquired.
@@ -345,12 +429,16 @@ def build_extraction_manifest(
                     campaign_abbreviation
                 ).strip()
             ),
-            "id": str(
-                campaign_id
-            ).strip(),
+            "id": (
+                str(
+                    campaign_id
+                ).strip()
+            ),
         },
-        "extracted_at": _timestamp(
-            extracted_at
+        "extracted_at": (
+            _timestamp(
+                extracted_at
+            )
         ),
         "campaign_files": {
             "data_export": (
@@ -373,7 +461,9 @@ def build_extraction_manifest(
                     credentials_source_filename
                 )
             ),
-            "stored_in_dataset": False,
+            "stored_in_dataset": (
+                False
+            ),
         },
     }
 
@@ -395,7 +485,9 @@ def write_manifest(
         manifest
     )
 
-    path = Path(path)
+    path = Path(
+        path
+    )
 
     path.parent.mkdir(
         parents=True,
@@ -413,13 +505,17 @@ def write_manifest(
             ensure_ascii=False,
         )
 
-        handle.write("\n")
+        handle.write(
+            "\n"
+        )
 
 
 def read_manifest(
     path: Path,
 ) -> dict[str, Any]:
-    path = Path(path)
+    path = Path(
+        path
+    )
 
     with path.open(
         "r",
@@ -427,6 +523,14 @@ def read_manifest(
     ) as handle:
         manifest = json.load(
             handle
+        )
+
+    if not isinstance(
+        manifest,
+        dict,
+    ):
+        raise ValueError(
+            "Manifest must contain a JSON object."
         )
 
     _check_for_sensitive_fields(

@@ -4,6 +4,7 @@ import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
 
 from src.acquisition.gamebus_campaigns import (
     DEFAULT_CAMPAIGNS_BASE_URL,
@@ -22,6 +23,22 @@ from src.datasets.manifests import (
 )
 
 
+ProgressCallback = Callable[
+    [str],
+    None,
+]
+
+
+def _report_progress(
+    callback: ProgressCallback | None,
+    message: str,
+) -> None:
+    if callback is not None:
+        callback(
+            message
+        )
+
+
 def bootstrap_campaign_dataset(
     *,
     campaign_abbreviation: str,
@@ -31,6 +48,7 @@ def bootstrap_campaign_dataset(
     datasets_dir: Path = DATASETS_DIR,
     base_url: str = DEFAULT_CAMPAIGNS_BASE_URL,
     extracted_at: datetime | None = None,
+    progress_callback: ProgressCallback | None = None,
 ) -> Path:
     """
     Create a new organizer-level GameBus dataset.
@@ -64,6 +82,11 @@ def bootstrap_campaign_dataset(
     ) as temp_dir:
         staging_dir = Path(temp_dir)
 
+        _report_progress(
+            progress_callback,
+            "campaign_description",
+        )
+
         description_path = (
             download_campaign_description(
                 campaign_abbreviation=abbreviation,
@@ -73,6 +96,11 @@ def bootstrap_campaign_dataset(
                 cookie_file=cookie_file,
                 base_url=base_url,
             )
+        )
+
+        _report_progress(
+            progress_callback,
+            "campaign_analytics",
         )
 
         data_export_path = (
@@ -110,6 +138,11 @@ def bootstrap_campaign_dataset(
             )
 
         campaign_id = description_campaign_id
+
+        _report_progress(
+            progress_callback,
+            "saving_dataset",
+        )
 
         dataset_dir = create_dataset_directory(
             campaign_abbreviation=abbreviation,

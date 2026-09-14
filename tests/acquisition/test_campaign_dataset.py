@@ -5,6 +5,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
+from collections.abc import Callable
 
 from src.acquisition.campaign_dataset import (
     bootstrap_campaign_dataset,

@@ -40,6 +40,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "organizer_email": "",
     "remember_credentials": True,
     "last_campaign_abbreviation": "",
+    "campaign_abbreviations": [],
+    "datasets_dir": "",
 }
 
 
@@ -93,6 +95,46 @@ def _normalize_settings(
             "remember_credentials"
         ] = True
 
+    if not isinstance(
+        merged.get(
+            "datasets_dir"
+        ),
+        str,
+    ):
+        merged[
+            "datasets_dir"
+        ] = ""
+
+    campaigns = merged.get(
+        "campaign_abbreviations"
+    )
+
+    if not isinstance(
+        campaigns,
+        list,
+    ):
+        campaigns = []
+
+    normalized_campaigns = []
+
+    for campaign in campaigns:
+        if not isinstance(
+            campaign,
+            str,
+        ):
+            continue
+
+        campaign = campaign.strip()
+
+        if (
+            campaign
+            and campaign
+            not in normalized_campaigns
+        ):
+            normalized_campaigns.append(
+                campaign
+            )
+
     merged[
         "organizer_email"
     ] = (
@@ -110,6 +152,32 @@ def _normalize_settings(
         ]
         .strip()
     )
+
+    merged[
+        "datasets_dir"
+    ] = (
+        merged[
+            "datasets_dir"
+        ]
+        .strip()
+    )
+
+    last_campaign = merged[
+        "last_campaign_abbreviation"
+    ]
+
+    if (
+        last_campaign
+        and last_campaign
+        not in normalized_campaigns
+    ):
+        normalized_campaigns.append(
+            last_campaign
+        )
+
+    merged[
+        "campaign_abbreviations"
+    ] = normalized_campaigns
 
     return merged
 

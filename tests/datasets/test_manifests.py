@@ -71,27 +71,51 @@ class TestDatasetManifests(unittest.TestCase):
             1,
         )
 
-    def test_selected_extraction_requires_analysis_selection(
-        self,
+    def test_analysis_selection_can_change_after_extraction(
+            self,
     ) -> None:
-        with self.assertRaises(
-            ValueError
-        ):
-            build_cohort_manifest(
-                campaign_abbreviation="UNISG",
-                campaign_id=379,
-                participants=[
-                    {
-                        "pid": 245,
-                        "email": (
-                            "participant@example.org"
-                        ),
-                        "selected_for_analysis": False,
-                        "credentials_available": True,
-                        "selected_for_participant_extraction": True,
-                    }
-                ],
-            )
+        manifest = build_cohort_manifest(
+            campaign_abbreviation="TEST",
+            campaign_id="123",
+            participants=[
+                {
+                    "pid": "10",
+                    "email": "a@example.org",
+                    "selected_for_analysis": False,
+                    "credentials_available": True,
+                    "selected_for_participant_extraction": True,
+                    "participant_data_extracted": True,
+                }
+            ],
+            candidate_source=(
+                "gamebus_studio_users"
+            ),
+        )
+
+        participant = (
+            manifest[
+                "participants"
+            ][0]
+        )
+
+        self.assertFalse(
+            participant[
+                "selected_for_analysis"
+            ]
+        )
+
+        self.assertTrue(
+            participant[
+                "selected_for_participant_extraction"
+            ]
+        )
+
+        self.assertTrue(
+            participant[
+                "participant_data_extracted"
+            ]
+        )
+
 
     def test_selected_extraction_requires_credentials(
         self,

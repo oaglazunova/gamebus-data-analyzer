@@ -344,7 +344,7 @@ def build_initial_cohort_candidates(
     With credentials:
         only matching accounts are initially selected.
 
-    Participant-level extraction is initially selected only
+    Participant extraction is initially selected only
     when the account is selected for analysis AND credentials
     are available.
     """

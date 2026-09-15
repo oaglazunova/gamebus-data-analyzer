@@ -78,7 +78,7 @@ def extract_participant_data(
     progress_callback: ProgressCallback | None = None,
 ) -> list[ParticipantExtractionResult]:
     """
-    Extract participant-level GameBus data.
+    Extract participant GameBus data.
 
     Only participants explicitly marked with
     selected_for_participant_extraction=True are processed.

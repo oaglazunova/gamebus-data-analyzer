@@ -60,7 +60,7 @@ def bootstrap_campaign_dataset(
 
     Both original GameBus filenames are preserved.
 
-    Participant-level extraction is deliberately not performed
+    Participant extraction is deliberately not performed
     here. That happens only after cohort verification and,
     optionally, provision of the participant credentials XLSX.
     """

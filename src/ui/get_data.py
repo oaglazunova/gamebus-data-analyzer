@@ -346,6 +346,25 @@ def _apply_extraction_results(
                 "participant_data_extracted"
             ] = True
 
+    cohort_manifest.setdefault(
+        "counts",
+        {},
+    )[
+        "participant_data_extracted"
+    ] = sum(
+        1
+        for participant in (
+            cohort_manifest.get(
+                "participants",
+                [],
+            )
+        )
+        if participant.get(
+            "participant_data_extracted",
+            False,
+        )
+    )
+
     return cohort_manifest
 
 
@@ -457,7 +476,7 @@ def _render_participant_review(
     else:
         review_label = (
             "Review participants before "
-            "participant-level extraction"
+            "participant data extraction"
         )
 
     with st.expander(
@@ -783,7 +802,7 @@ def _render_participant_review(
             st.caption(
                 "Review and save the participant "
                 "selection before starting "
-                "participant-level data extraction."
+                "participant data extraction."
             )
 
 
@@ -807,7 +826,7 @@ def _render_participant_extraction(
     st.divider()
 
     st.subheader(
-        "Participant-level data"
+        "Participant data"
     )
 
     cohort_manifest = read_manifest(
@@ -854,7 +873,7 @@ def _render_participant_extraction(
         st.warning(
             "No selected participants have "
             "matching credentials, so there is "
-            "no participant-level data to extract."
+            "no participant data to extract."
         )
 
         return
@@ -867,7 +886,7 @@ def _render_participant_extraction(
 
     if already_extracted:
         st.caption(
-            "Participant-level data have already "
+            "Participant data have already "
             "been extracted for "
             f"{len(already_extracted)} "
             "participant(s)."
@@ -875,7 +894,7 @@ def _render_participant_extraction(
 
     if not remaining:
         st.success(
-            "Participant-level data have already "
+            "Participant data have already "
             "been extracted for all selected "
             "participants."
         )
@@ -888,7 +907,7 @@ def _render_participant_extraction(
     )
 
     if not st.button(
-        "Extract participant-level data",
+        "Extract participant data",
         type="primary",
         use_container_width=True,
     ):
@@ -903,7 +922,7 @@ def _render_participant_extraction(
     )
 
     with st.status(
-        "Extracting participant-level data",
+        "Extracting participant data",
         expanded=True,
     ) as status:
 
@@ -1030,17 +1049,14 @@ def _render_participant_extraction(
             progress.progress(
                 100,
                 text=(
-                    "Participant-level "
-                    "extraction complete."
+                    "Participant data extraction complete."
                 ),
             )
 
             if failed:
                 status.update(
                     label=(
-                        "Participant-level "
-                        "extraction finished "
-                        "with warnings"
+                        "Participant data extraction finished with warnings"
                     ),
                     state="complete",
                     expanded=True,
@@ -1049,16 +1065,14 @@ def _render_participant_extraction(
             else:
                 status.update(
                     label=(
-                        "Participant-level "
-                        "data extracted"
+                        "Participant data extracted"
                     ),
                     state="complete",
                     expanded=False,
                 )
 
             st.success(
-                "Participant-level data were "
-                "successfully extracted for "
+                "Participant data were successfully extracted for "
                 f"{len(successful)} of "
                 f"{len(results)} participant(s)."
             )
@@ -1105,16 +1119,14 @@ def _render_participant_extraction(
         except Exception as exc:
             status.update(
                 label=(
-                    "Participant-level "
-                    "extraction failed"
+                    "Participant data extraction failed"
                 ),
                 state="error",
                 expanded=True,
             )
 
             st.error(
-                "Participant-level "
-                f"extraction failed: {exc}"
+                "Participant data extraction failed: {exc}"
             )
 
 
@@ -1226,8 +1238,7 @@ def _show_campaign_summary() -> None:
             "campaign data export have been "
             "downloaded from GameBus Studio. "
             "Participant credentials were not "
-            "provided, so participant-level "
-            "data were not extracted from the "
+            "provided, so participant data were not extracted from the "
             "GameBus database."
         )
 
@@ -1250,7 +1261,7 @@ def _show_campaign_summary() -> None:
             "Participant credentials were "
             "provided. Review the participants "
             "below before starting "
-            "participant-level data extraction."
+            "participant data extraction."
         )
 
         col1, col2, col3 = (
@@ -1301,7 +1312,7 @@ def _show_campaign_summary() -> None:
                 "credential account(s) are not "
                 "members of this campaign and "
                 "will not be used for "
-                "participant-level extraction."
+                "participant data extraction."
             )
 
         else:
@@ -1599,7 +1610,7 @@ def render_get_data_page() -> None:
         "analytics available through GameBus "
         "Studio. With participant credentials, "
         "you can additionally extract "
-        "participant-level data from the "
+        "participant data from the "
         "GameBus database after reviewing the "
         "participant list."
     )

@@ -172,7 +172,7 @@ def build_cohort_manifest(
     Analysis selection and acquisition history are separate.
 
     A participant may therefore later be excluded from
-    analysis even when participant-level data were previously
+    analysis even when participant data were previously
     selected for extraction or successfully extracted.
 
     Passwords must never be passed or persisted.
@@ -242,14 +242,14 @@ def build_cohort_manifest(
         # selected_for_analysis=True here.
         #
         # Analysis selection may be changed later without
-        # erasing the historical fact that participant-level
+        # erasing the historical fact that participant
         # data were selected for or completed extraction.
         if (
             selected_for_extraction
             and not credentials_available
         ):
             raise ValueError(
-                "Participant-level extraction cannot "
+                "Participant extraction cannot "
                 "be selected when credentials are "
                 "not available."
             )
@@ -260,7 +260,7 @@ def build_cohort_manifest(
         ):
             raise ValueError(
                 "participant_data_extracted cannot be "
-                "true unless participant-level "
+                "true unless participant "
                 "extraction was selected."
             )
 

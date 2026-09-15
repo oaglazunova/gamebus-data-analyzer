@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import streamlit as st
 
+from src.ui.analyze_data import (
+    render_analyze_data_page,
+)
 from src.ui.get_data import (
     render_get_data_page,
 )
@@ -31,15 +34,7 @@ def main() -> None:
         render_get_data_page()
 
     else:
-        st.header(
-            "Analyze existing data"
-        )
-
-        st.info(
-            "Dataset-folder selection and "
-            "independent analysis will be "
-            "connected next."
-        )
+        render_analyze_data_page()
 
 
 if __name__ == "__main__":

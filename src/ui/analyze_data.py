@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from tkinter import filedialog
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -24,6 +25,7 @@ from src.analysis.dataset_analysis import (
     DatasetAnalysisError,
     run_dataset_analysis,
 )
+
 
 
 DATASET_PATH_KEY = (
@@ -278,6 +280,222 @@ def _show_dataset_summary(
                 inspection.analysis_dir
             )
         )
+
+
+def _render_new_cohort_review(
+    inspection: DatasetInspection,
+) -> None:
+    snapshot = (
+        inspection.campaign_users_snapshot
+    )
+
+    if snapshot is None:
+        st.warning(
+            "This dataset has no saved participant "
+            "cohort and no campaign account snapshot."
+        )
+
+        st.info(
+            "For older datasets, participant accounts "
+            "cannot always be reconstructed completely "
+            "without GameBus Studio. We will add a "
+            "legacy fallback separately."
+        )
+
+        return
+
+    accounts = snapshot.get(
+        "accounts",
+        [],
+    )
+
+    if not accounts:
+        st.warning(
+            "campaign_users.json contains no accounts."
+        )
+
+        return
+
+    st.subheader(
+        "Review participants"
+    )
+
+    st.write(
+        "This dataset does not yet have a saved "
+        "analysis cohort. Review the GameBus Studio "
+        "accounts below and exclude any test or "
+        "administrator accounts."
+    )
+
+    st.caption(
+        "All accounts are included by default. "
+        "This selection affects analysis only; "
+        "no participant data will be downloaded."
+    )
+
+    rows = []
+
+    for account in accounts:
+        rows.append(
+            {
+                "Include": True,
+                "Email": (
+                    account.get(
+                        "email"
+                    )
+                    or ""
+                ),
+                "PID": (
+                    account.get(
+                        "pid"
+                    )
+                    or ""
+                ),
+                "Account ID": (
+                    account.get(
+                        "account_id"
+                    )
+                    or ""
+                ),
+            }
+        )
+
+    edited = st.data_editor(
+        pd.DataFrame(
+            rows
+        ),
+        hide_index=True,
+        use_container_width=True,
+        num_rows="fixed",
+        key="new_analysis_cohort_editor",
+        disabled=[
+            "Email",
+            "PID",
+            "Account ID",
+        ],
+        column_config={
+            "Include": (
+                st.column_config.CheckboxColumn(
+                    "Include"
+                )
+            ),
+            "Email": (
+                st.column_config.TextColumn(
+                    "Email"
+                )
+            ),
+            "PID": (
+                st.column_config.TextColumn(
+                    "PID"
+                )
+            ),
+            "Account ID": (
+                st.column_config.TextColumn(
+                    "Account ID"
+                )
+            ),
+        },
+    )
+
+    selected_count = int(
+        edited[
+            "Include"
+        ].sum()
+    )
+
+    st.caption(
+        f"{selected_count} of "
+        f"{len(accounts)} accounts selected."
+    )
+
+    if st.button(
+        "Save analysis cohort",
+        type="primary",
+        use_container_width=True,
+        disabled=(
+            selected_count == 0
+        ),
+    ):
+        participants = []
+
+        for index, account in enumerate(
+            accounts
+        ):
+            participants.append(
+                {
+                    "account_id": (
+                        account.get(
+                            "account_id"
+                        )
+                    ),
+                    "pid": (
+                        account.get(
+                            "pid"
+                        )
+                    ),
+                    "email": (
+                        account.get(
+                            "email"
+                        )
+                    ),
+                    "selected_for_analysis": bool(
+                        edited.iloc[
+                            index
+                        ][
+                            "Include"
+                        ]
+                    ),
+                    "credentials_available": False,
+                    "selected_for_participant_extraction": False,
+                    "participant_data_extracted": False,
+                }
+            )
+
+        campaign = snapshot.get(
+            "campaign",
+            {},
+        )
+
+        manifest = (
+            build_cohort_manifest(
+                campaign_abbreviation=(
+                    campaign.get(
+                        "abbreviation"
+                    )
+                    or inspection.campaign_abbreviation
+                    or "UNKNOWN"
+                ),
+                campaign_id=(
+                    campaign.get(
+                        "id"
+                    )
+                    or inspection.campaign_id
+                    or "UNKNOWN"
+                ),
+                participants=(
+                    participants
+                ),
+                verified_at=(
+                    datetime.now().astimezone()
+                ),
+                candidate_source=(
+                    "gamebus_studio_users"
+                ),
+            )
+        )
+
+        write_manifest(
+            get_cohort_manifest_path(
+                inspection.dataset_dir
+            ),
+            manifest,
+        )
+
+        st.success(
+            "Analysis cohort saved."
+        )
+
+        st.rerun()
 
 
 def _render_existing_cohort(
@@ -819,6 +1037,11 @@ def render_analyze_data_page() -> None:
 
     if inspection.has_cohort_manifest:
         _render_existing_cohort(
+            inspection
+        )
+
+    else:
+        _render_new_cohort_review(
             inspection
         )
 

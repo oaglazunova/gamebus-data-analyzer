@@ -27,12 +27,18 @@ from src.datasets.layout import (
     DATASETS_DIR,
     get_cohort_manifest_path,
     get_extraction_manifest_path,
+    get_campaign_users_path,
 )
 from src.datasets.manifests import (
     build_cohort_manifest,
     read_manifest,
     write_manifest,
 )
+from src.datasets.campaign_users_snapshot import (
+    build_campaign_users_snapshot,
+    write_campaign_users_snapshot,
+)
+
 
 
 DATASET_STATE_KEY = "get_data_dataset_dir"
@@ -1795,6 +1801,27 @@ def render_get_data_page() -> None:
                 cookie_file=(
                     get_cookie_file()
                 ),
+            )
+
+            campaign_users_snapshot = (
+                build_campaign_users_snapshot(
+                    campaign_abbreviation=(
+                        campaign_abbreviation
+                    ),
+                    campaign_id=(
+                        campaign_id
+                    ),
+                    users=(
+                        users
+                    ),
+                )
+            )
+
+            write_campaign_users_snapshot(
+                get_campaign_users_path(
+                    dataset_dir
+                ),
+                campaign_users_snapshot,
             )
 
             status.write(

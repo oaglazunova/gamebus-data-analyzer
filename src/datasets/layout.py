@@ -10,6 +10,7 @@ DATASETS_DIR = PROJECT_ROOT / "datasets"
 
 COHORT_MANIFEST_FILENAME = "cohort_manifest.json"
 EXTRACTION_MANIFEST_FILENAME = "extraction_manifest.json"
+CAMPAIGN_USERS_FILENAME = "campaign_users.json"
 RAW_DATA_DIRNAME = "data_raw"
 ANALYSIS_DIRNAME = "data_analysis"
 
@@ -154,4 +155,13 @@ def get_extraction_manifest_path(
     return (
         Path(dataset_dir)
         / EXTRACTION_MANIFEST_FILENAME
+    )
+
+
+def get_campaign_users_path(
+    dataset_dir: Path,
+) -> Path:
+    return (
+        Path(dataset_dir)
+        / CAMPAIGN_USERS_FILENAME
     )

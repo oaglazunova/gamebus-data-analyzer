@@ -3,15 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import zipfile
+from typing import Any
 
 from src.datasets.layout import (
     get_analysis_dir,
     get_cohort_manifest_path,
     get_extraction_manifest_path,
     get_raw_data_dir,
+    get_campaign_users_path,
 )
 from src.datasets.manifests import (
     read_manifest,
+)
+from src.datasets.campaign_users_snapshot import (
+    read_campaign_users_snapshot,
 )
 
 
@@ -35,18 +40,15 @@ class DatasetValidationError(
 )
 class DatasetInspection:
     dataset_dir: Path
-
     campaign_abbreviation: str | None
     campaign_id: str | None
-
     campaign_data_path: Path
     campaign_description_path: Path
-
     extraction_manifest: dict | None
     cohort_manifest: dict | None
-
     raw_data_dir: Path
     analysis_dir: Path
+    campaign_users_snapshot: dict[str, Any] | None
 
     @property
     def has_extraction_manifest(
@@ -121,6 +123,37 @@ class DatasetInspection:
                 )
             )
         )
+
+    @property
+    def has_campaign_users_snapshot(
+            self,
+    ) -> bool:
+        return (
+                self.campaign_users_snapshot
+                is not None
+        )
+
+    @property
+    def campaign_account_count(
+            self,
+    ) -> int:
+        if (
+                self.campaign_users_snapshot
+                is None
+        ):
+            return 0
+
+        accounts = (
+            self.campaign_users_snapshot.get(
+                "accounts",
+                [],
+            )
+        )
+
+        return len(
+            accounts
+        )
+
 
 
 def _validate_dataset_directory(
@@ -542,6 +575,28 @@ def inspect_dataset(
         cohort_manifest,
     )
 
+    campaign_users_path = (
+        get_campaign_users_path(
+            dataset_dir
+        )
+    )
+
+    campaign_users_snapshot = None
+
+    if campaign_users_path.exists():
+        try:
+            campaign_users_snapshot = (
+                read_campaign_users_snapshot(
+                    campaign_users_path
+                )
+            )
+        except Exception as exc:
+            raise DatasetValidationError(
+                "Could not read "
+                "campaign_users.json: "
+                f"{exc}"
+            ) from exc
+
     return DatasetInspection(
         dataset_dir=(
             dataset_dir
@@ -573,5 +628,8 @@ def inspect_dataset(
             get_analysis_dir(
                 dataset_dir
             )
+        ),
+        campaign_users_snapshot=(
+            campaign_users_snapshot
         ),
     )

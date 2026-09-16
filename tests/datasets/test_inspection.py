@@ -10,6 +10,10 @@ from src.datasets.inspection import (
     DatasetValidationError,
     inspect_dataset,
 )
+from src.datasets.campaign_users_snapshot import (
+    build_campaign_users_snapshot,
+    write_campaign_users_snapshot,
+)
 
 
 def _write_campaign_zip(
@@ -324,6 +328,111 @@ class TestDatasetInspection(
             ):
                 inspect_dataset(
                     dataset_dir
+                )
+
+    def test_campaign_users_snapshot_is_loaded(
+            self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            _write_campaign_zip(
+                root / "campaign-283-export.zip"
+            )
+
+            (
+                    root
+                    / "campaign-283.xlsx"
+            ).write_bytes(
+                b"placeholder"
+            )
+
+            snapshot = (
+                build_campaign_users_snapshot(
+                    campaign_abbreviation=(
+                        "HW8_YA_HB"
+                    ),
+                    campaign_id="283",
+                    users=[
+                        {
+                            "account_id": "501",
+                            "pid": "497",
+                            "email": (
+                                "user@example.org"
+                            ),
+                        }
+                    ],
+                )
+            )
+
+            write_campaign_users_snapshot(
+                root / "campaign_users.json",
+                snapshot,
+            )
+
+            inspection = inspect_dataset(
+                root
+            )
+
+            self.assertTrue(
+                inspection
+                .has_campaign_users_snapshot
+            )
+
+            self.assertEqual(
+                inspection
+                .campaign_account_count,
+                1,
+            )
+
+            self.assertEqual(
+                inspection
+                .campaign_users_snapshot[
+                    "accounts"
+                ][0]["pid"],
+                "497",
+            )
+
+    def test_invalid_campaign_users_snapshot_is_rejected(
+            self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            _write_campaign_zip(
+                root / "campaign-283-export.zip"
+            )
+
+            (
+                    root
+                    / "campaign-283.xlsx"
+            ).write_bytes(
+                b"placeholder"
+            )
+
+            (
+                    root
+                    / "campaign_users.json"
+            ).write_text(
+                """
+                {
+                  "schema_version": 1,
+                  "campaign": {
+                    "abbreviation": "HW8_YA_HB",
+                    "id": "283"
+                  },
+                  "accounts": "not-a-list"
+                }
+                """,
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                    DatasetValidationError,
+                    "campaign_users.json",
+            ):
+                inspect_dataset(
+                    root
                 )
 
 

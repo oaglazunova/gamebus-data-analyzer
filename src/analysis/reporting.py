@@ -6,7 +6,6 @@ import json
 from typing import Tuple, Dict, Optional, Union, List
 import pandas as pd
 
-from config.paths import PROJECT_ROOT
 from src.analysis.common import ensure_dir, safe_filename, OUTPUT_VISUALIZATIONS_DIR, _mean_sd, _fmt_pct, _bucket_hour, _fmt_mean_sd, logger
 from src.analysis.loaders import extract_points, extract_detailed_rewards
 
@@ -492,7 +491,9 @@ def generate_analysis_report(
 	dropout_metrics: Optional[Dict],
 	joining_metrics: Optional[Dict] = None,
 ) -> str:
-	data_analysis_dir = ensure_dir(os.path.join(PROJECT_ROOT, "data_analysis"))
+	data_analysis_dir = ensure_dir(
+		OUTPUT_VISUALIZATIONS_DIR
+	)
 	report_path = os.path.join(data_analysis_dir, "analysis_report.txt")
 
 	cm = campaign_metrics or {}

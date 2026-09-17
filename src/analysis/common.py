@@ -1,3 +1,9 @@
+from contextlib import contextmanager
+from contextvars import ContextVar
+from pathlib import Path
+from typing import Iterator
+
+
 # -----------------------------------------------------------------------------
 # Path setup (project root + config import)
 # -----------------------------------------------------------------------------
@@ -18,7 +24,114 @@ from config.paths import PROJECT_ROOT  # noqa: E402
 # -----------------------------------------------------------------------------
 # Output directories
 # -----------------------------------------------------------------------------
-OUTPUT_VISUALIZATIONS_DIR = os.path.join(PROJECT_ROOT, "data_analysis")
+class RuntimePath(
+    os.PathLike[str]
+):
+    """
+    Path-like object whose value can temporarily change
+    within the current execution context.
+
+    Modules may safely import this object directly:
+
+        from src.analysis.common import (
+            OUTPUT_VISUALIZATIONS_DIR,
+        )
+
+    Because the object itself remains the same, changing
+    its internal context value is visible everywhere that
+    imported it.
+
+    ContextVar also prevents one concurrent analysis run
+    from changing another run's output directory.
+    """
+
+    def __init__(
+        self,
+        default: str | os.PathLike[str],
+    ) -> None:
+        self._value: ContextVar[str] = (
+            ContextVar(
+                "analysis_output_directory",
+                default=os.fspath(
+                    default
+                ),
+            )
+        )
+
+    def __fspath__(
+        self,
+    ) -> str:
+        return self._value.get()
+
+    def __str__(
+        self,
+    ) -> str:
+        return self._value.get()
+
+    def set(
+        self,
+        value: str | os.PathLike[str],
+    ):
+        return self._value.set(
+            os.fspath(
+                value
+            )
+        )
+
+    def reset(
+        self,
+        token,
+    ) -> None:
+        self._value.reset(
+            token
+        )
+
+
+OUTPUT_VISUALIZATIONS_DIR = RuntimePath(
+    os.path.join(
+        PROJECT_ROOT,
+        "data_analysis",
+    )
+)
+
+
+@contextmanager
+def use_analysis_output_directory(
+    output_dir: str | os.PathLike[str],
+) -> Iterator[Path]:
+    """
+    Temporarily route all analysis outputs to one directory.
+
+    Existing plotting/reporting code can continue using
+    OUTPUT_VISUALIZATIONS_DIR unchanged.
+    """
+    target = (
+        Path(
+            output_dir
+        )
+        .expanduser()
+        .resolve()
+    )
+
+    target.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    token = (
+        OUTPUT_VISUALIZATIONS_DIR.set(
+            target
+        )
+    )
+
+    try:
+        yield target
+
+    finally:
+        OUTPUT_VISUALIZATIONS_DIR.reset(
+            token
+        )
+        
 CONFIG_DIR = os.path.join(PROJECT_ROOT, "config")
 RAW_DATA_DIR = os.path.join(PROJECT_ROOT, "data_raw")
 LOGS_DIR = os.path.join(PROJECT_ROOT, "logs")

@@ -19,12 +19,13 @@ class AllDataCollector:
     """
 
     def __init__(
-        self,
-        client,
-        token: str,
-        user_id: int,
-        user_email: Optional[str] = None,
-        account_user_id: Optional[str] = None,
+            self,
+            client,
+            token: str,
+            user_id: int,
+            user_email: Optional[str] = None,
+            account_user_id: Optional[str] = None,
+            output_dir=RAW_DATA_DIR,
     ):
         """
         Initialize the collector.
@@ -41,6 +42,9 @@ class AllDataCollector:
         self.user_id = user_id
         self.user_email = user_email
         self.account_user_id = account_user_id
+        self.output_dir = os.fspath(
+            output_dir
+        )
 
         # Keep a simple ordered list of descriptors instead of an over-engineered config dict
         self.descriptors = list(VALID_GAME_DESCRIPTORS)
@@ -58,7 +62,10 @@ class AllDataCollector:
         file_paths: List[str] = []
         all_raw_responses: List[str] = []
 
-        os.makedirs(RAW_DATA_DIR, exist_ok=True)
+        os.makedirs(
+            self.output_dir,
+            exist_ok=True,
+        )
 
         for descriptor in self.descriptors:
             data_type = descriptor.lower()
@@ -228,7 +235,10 @@ class AllDataCollector:
             return ""
 
         file_name = f"player_{self.user_id}_all_raw.json"
-        file_path = os.path.join(RAW_DATA_DIR, file_name)
+        file_path = os.path.join(
+            self.output_dir,
+            file_name,
+        )
 
         try:
             parsed_responses = []
@@ -373,7 +383,10 @@ class AllDataCollector:
             return ""
 
         json_file_name = f"player_{self.user_id}_{data_type}.json"
-        json_file_path = os.path.join(RAW_DATA_DIR, json_file_name)
+        json_file_path = os.path.join(
+            self.output_dir,
+            json_file_name,
+        )
 
         excluded_fields = [
             "X_GAME_DESCRIPTOR",

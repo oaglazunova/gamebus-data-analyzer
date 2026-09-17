@@ -1,411 +1,425 @@
-# GameBus Data Analyzer v1.2
+# GameBus Data Analyzer
 
-A tool for extracting and analyzing health behavior data from the GameBus platform.
+GameBus Data Analyzer is a user-friendly tool for downloading and analyzing health-behavior data from GameBus campaigns.
 
-## Overview
+The current version provides a Streamlit interface with two independent workflows:
 
-This project extracts user activity data from the GameBus API and performs various analyses to generate insights about user behavior, activity patterns, and engagement.
-The script can technically run on Linux and Mac, but officially we support only Windows.
+- **Get data** — download campaign data from GameBus Studio and, optionally, participant data from the GameBus database.
+- **Analyze existing data** — select a previously created dataset, review the analysis cohort, and generate analysis outputs.
 
-If new game descriptors were added to GameBus, the list of game descriptors in `\config\settings.py` also needs to be updated. You can also use this list to limit extracted data by commenting out certain game descriptors.
+The earlier command-line version of the analyzer is preserved as **GameBus Data Analyzer v1.2**.
 
+---
 
-## Quick Start
+## Requirements
 
-1. **Install Python**. Recommended: Python 3.11. The script was tested with Python 3.9 and 3.11. Avoid Python 3.14 unless dependencies have been updated, because some pinned scientific packages may not have compatible prebuilt wheels.
-2. **Set up environment**: 
-   ```
-   python -m venv .venv
-   .venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
-3. **Configure**:
-   - Create `.env` file with `GAMEBUS_API_KEY=your_api_key_here`
-   - For user data extraction, add user credentials to `config/users.xlsx` (see Configuration section below for format). You don't need user credentials if you intend to analyze only the data downloaded from GameBus campaigns website. 
-   - For analysis, add campaign files: campaign data as `config/campaign_data.zip`, and campaign description as `config/campaign_desc.xlsx`. If you intend only to extract user data from the database, you don't need these files, only user credentials.
-![img.png](img.png)
-![img_1.png](img_1.png)
+The application is officially supported on Windows.
 
-4. **Run**:
-   ```
-   python pipeline.py                    # Full pipeline (extraction + analysis), or:
-   python pipeline.py --extract          # Only extract data, or:
-   python pipeline.py --analyze          # Only analyze existing data, or:
-   python pipeline.py --log-level DEBUG  # Verbose logging
-   ```
+Recommended:
 
-Next time, you need only to activate the virtual environment, then run the script:
-```  
-   .venv\Scripts\activate
-   python pipeline.py
+- Python 3.11
+- Git
+- access to GameBus Studio
+- a GameBus API key if participant data need to be downloaded
+
+---
+
+## Installation
+
+Clone the repository:
+
+```powershell
+git clone https://github.com/oaglazunova/gamebus-data-analyzer.git
+cd gamebus-data-analyzer
 ```
 
-## Detailed Start Guide
+Create and activate a virtual environment:
 
-Follow these steps if you're new to running Python projects on Windows. Use Windows PowerShell for the commands below.
-
-1) Install Python and add it to PATH
-- Download Python from `https://www.python.org/downloads/` 
-- During installation, check “Add python.exe to PATH”.
-- Verify installation by typing in Windows PowerShell:
-  ```
-  python --version   # or: py --version
-  ```
-
-2) Get the project code
-- Option A (recommended): Install Git for Windows (`https://git-scm.com/download/win`) and run in Windows PowerShell or in Git Bash:
-  ```
-  git clone https://github.com/oaglazunova/gamebus-data-analyzer.git
-  ```
-- Option B: Click “Code” → “Download ZIP” on GitHub, then unzip to a folder, e.g. `C:\Users\You\Documents\gamebus-data-analyzer`.
-
-3) Open PowerShell (or Git Bash) in the project folder
-- In File Explorer, right‑click the project folder → “Open in Terminal”, or:
-  ```
-  cd C:\Users\You\Documents\gamebus-data-analyzer
-  ```
-
-4) Create and activate a virtual environment
-- Create venv (either command works):
-  ```
-  python -m venv .venv
-  # or
-  py -3 -m venv .venv
-  ```
-- Activate it (PowerShell):
-  ```
-  .\.venv\Scripts\Activate.ps1
-  ```
-- If you get “running scripts is disabled on this system,” temporarily allow it for this session:
-  ```
-  Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-  .\.venv\Scripts\Activate.ps1
-  ```
-- You should see `(.venv)` at the start of your prompt. To deactivate later, run `deactivate`.
-
-5) Install dependencies
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 ```
+
+If PowerShell blocks script execution:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+Install dependencies:
+
+```powershell
 python -m pip install -r requirements.txt
 ```
-If `pip` is not recognized, always prefer `python -m pip ...` on Windows.
 
-6) Add your GameBus API key (.env). For security reasons, the API key will be sent by the GameBus team via Keybase (a secure messenger).
-- Create a file named `.env` in the project root (same folder as `pipeline.py`).
-- Put your client credentials key on a single line:
-  ```
-  GAMEBUS_API_KEY=your_api_key_here
-  ```
+---
 
-7) Add users.xlsx
-- Copy your list of users and passwords to `config\` and rename to `users.xlsx`.
-- Verify that it has headers `email` and `password` (lowercase). Example row:
-  ```
-  email              | password
-  user@example.com   | secret123
+## Starting the application
 
-8) (Optional, only for analysis) Add campaign files
-- Provide campaign description as `config\campaign_desc.xlsx`  
-- Provide campaign data as `config\campaign_data.zip`
+Run:
 
-9) Run the pipeline
-- Full run (extract + analyze):
-  ```
-  python pipeline.py
-  ```
-- Only extract or only analyze:
-  ```
-  python pipeline.py --extract
-  python pipeline.py --analyze
-  ```
-- More logs:
-  ```
-  python pipeline.py --log-level DEBUG
-  ```
-
-10) Where results appear
-- Raw JSON: `data_raw\`
-- User-email mapping: `data_raw\user_email_mapping.txt` (auto-generated after extraction)
-- Analysis outputs: `data_analysis\`
-- Logs: `logs\data_extraction.log` and `logs\data_analysis.log`
-
-**Next time, you need only to activate the virtual environment, then run the script with the desired arguments:**
-```  
-   .venv\Scripts\activate
-   python pipeline.py
+```powershell
+streamlit run streamlit_app.py
 ```
 
-Troubleshooting on Windows
-- “python is not recognized”: try `py` instead (e.g., `py -3 -m venv .venv`, `py pipeline.py`).
-- “Permission denied” activating venv: run the `Set-ExecutionPolicy` command shown above and activate again.
-- Pip SSL or proxy issues: try `python -m pip install --upgrade pip` or configure your corporate proxy per IT guidelines.
-- If Excel files are open, some operations may fail—close them and retry.
+The application opens in the browser.
 
-## Project Structure
+Two actions are available:
 
+- **Get data**
+- **Analyze existing data**
+
+---
+
+# Get data
+
+Use **Get data** to create a new self-contained GameBus dataset.
+
+## Campaign data
+
+Enter:
+
+- GameBus organizer email
+- organizer password, if required
+- campaign abbreviation
+- dataset destination folder
+
+The application downloads directly from GameBus Studio:
+
+- the campaign description XLSX;
+- the campaign analytics ZIP;
+- the list of accounts associated with the campaign.
+
+The original filenames returned by GameBus are preserved.
+
+Organizer credentials can optionally be remembered. The password is stored through the operating-system keyring rather than in the dataset.
+
+---
+
+## Participant data
+
+Participant credentials are optional.
+
+Without a participant-credentials file, the application downloads the campaign description and campaign analytics from GameBus Studio. These are sufficient for analyses based on campaign activity and campaign configuration.
+
+To additionally download participant data from the GameBus database, provide an XLSX file containing at least:
+
+```text
+email | password
 ```
-gamebus-data-analyzer/
-├── config/                # Configuration files
-├── src/                   # Source code
-│   ├── extraction/        # Data extraction from GameBus
-│   ├── analysis/          # Data analysis
-│   ├── scripts/           # Utility scripts
-│   └── utils/             # Utility functions
-├── data_raw/              # Raw extracted data
-├── data_analysis/         # Analysis output
-├── logs/                  # Log files
-└── pipeline.py            # Main pipeline runner
-```
 
-## Outputs and Logs
+Additional columns are allowed.
 
-- Raw API data is saved under `data_raw/` as JSON files (e.g., `player_<id>_<descriptor>.json`) and a combined `player_<id>_all_raw.json` per user.
-- A user-email mapping file is written to `data_raw/user_email_mapping.txt`.
-  - Format: `player_id=<pid> user_id=<uid>: <email>` (if account `user_id` cannot be determined, `-` is used).
-  - This file is normally generated after extraction.
-  - If it is missing at the start of analysis, the analysis pipeline generates it automatically from `config/users.xlsx`.
-  - Analysis uses this mapping to restrict all metrics to the participants listed in `users.xlsx`.
-- Analysis results are saved under `data_analysis/` (e.g., `analysis_report.txt` and generated figures).
-- Logs are written to `logs/data_extraction.log` (extraction) and `logs/data_analysis.log` (analysis).
-- Tip: use `--log-level DEBUG` for more verbose output when running `pipeline.py`.
+The credentials file is used only during the current application session. It is **not copied into the dataset** and participant passwords are not stored in dataset manifests.
 
-## Available Analyses
+Downloading participant data also requires a GameBus API key.
 
-Running `python -m src.analysis.data_analysis` or `python pipeline.py --analyze` saves all outputs **directly under `data_analysis/`** (no `visualizations/` or `statistics/` subfolders). Descriptive statistics are printed to the console during the run.
+Create a `.env` file in the project root:
 
-**Activities (from `config/campaign_data.xlsx`, sheet `activities`)**
-- Activity type distribution → `activity_types_distribution.png`
-- Activities over time (daily) → `activities_over_time.png`
-- Points by activity type (total) → `points_by_activity_type.png`
-- Points by player → `points_by_player.png`
-- Average rewarded points by activity type → `rewards_by_activity_type.png`
-- Points over time (daily) → `points_over_time.png`
-- Player activity counts (top 50 if many) → `player_activity_distribution.png`
-- Activity type × player (heatmap) → `activity_type_by_player.png`
-- Usage heatmap (weekday × hour) → `activity_heatmap_by_time.png`
-- Activity types stacked by date → `activity_types_stacked_by_date.png`
-- Player engagement heatmap (by day) → `player_engagement_heatmap.png`
-- Activities by day of week → `usage_by_day_of_week.png`
-
-- Wave comparisons:
-  - Overall comparison across waves → `wave_comparisons.png`
-  - By player → `wave_comparisons_by_player.png`
-  - By activity type → `wave_comparisons_by_activity_type.png`
-  - Points by activity type per wave → `wave_points_by_activity_type.png`
-
-**Campaign metrics & participation**
-
-- Active vs passive participants are calculated descriptor-based, using only participants listed in `config/users.xlsx`.
-- Separate scoped active/passive pie charts are generated:
-  - GameBus → `player_active_vs_passive_pie_gamebus.png`
-  - Nutrida → `player_active_vs_passive_pie_nutrida.png`
-  - Combined → `player_active_vs_passive_pie_combined.png`
-- A legacy reward-based active/passive count is still included in the text reports for comparison.
-
-- Churn:
-  - Churn counts over time → `churn_counts_over_time.png`
-  - Churn rate over time → `churn_rate_over_time.png`
-
-- **Real dropout, weekly retention, activity span, and joining**
-  - Real dropout status → `real_dropout_status.png`
-  - Weekly activity and retention → `weekly_retention.png`
-  - Activity-span histogram, defined as first recorded activity → last recorded activity → `dropout_rates_distribution.png`
-  - Joining-delay histogram, defined as first wave start → first qualifying activity → `joining_rates_distribution.png`
-  - Combined KDE of activity span vs joining delay → `combined_dropout_joining_rates.png`
-  - Combined boxplots of activity span vs joining delay → `combined_dropout_joining_boxplots.png`
-
-Important terminology:
-
-- “Activity span” is the number of days between a participant’s first and last recorded activity. It is not a dropout rate by itself.
-- “Real dropout” uses an inactivity threshold and the campaign wave end date.
-- “Weekly retention” reports participants who have started and have not crossed the inactivity threshold by the end of each week.
-
-**Challenges / Tasks (from `config/campaign_desc.xlsx`: sheets `visualizations`, `challenges`, `tasks`)**
-- Activity completion by type → `activity_completion.png`
-- Activity type by hour → `activity_type_by_hour.png`
-- Activity type by weekday → `activity_type_by_day.png`
-- Active players per day → `active_players_per_day.png`
-- Tasks by provider (mapped via `desc_tasks.dataproviders`, zero bars if none found) → `tasks_by_provider.png`
-- Tasks completed per day → `tasks_completed_per_day.png`
-- Tasks completed per player → `tasks_completed_per_player.png`
-
-**Rewards (from rewardedParticipations in activities data)**
-- Reward counts by challenge → `rewards_count_by_challenge.png`
-- Total rewarded points by challenge → `points_by_challenge.png`
-- Reward counts by rule → `rewards_count_by_rule.png`
-- Total rewarded points by rule → `points_by_rule.png`
-- Per activity type: total rewarded points by challenge → files under `data_analysis/by_type/` (e.g., `points_by_challenge_type_<TYPE>.png`)
-- Per challenge: total rewarded points by rule → files under `data_analysis/by_challenge/` (e.g., `points_by_rule_challenge_<CHALLENGE>.png`)
-
-**Geofence & steps (from JSON in `data_raw/`)**
-- Geofence hourly activity → `geofence_hourly_activity.png`
-- Geofence speed by hour → `geofence_speed_by_hour.png`
-- Movement trajectory (2D) → `geofence_movement_trajectory.png`
-- Geofence 3D visualization → `geofence_3d_visualization.png`
-- Steps trend (DAY_AGGREGATE) → `steps_trend.png`
-
-See the documentation in `src/analysis/data_analysis.py` for details on specific analyses.
-
-
-## Configuration
-
-### Configuration Files
-
-- `credentials.py`: API endpoints and authentication settings
-- `paths.py`: File paths used throughout the project
-- `settings.py`: General settings including valid game descriptors and API parameters
-- `users.xlsx`: User credentials for GameBus API access (you must create this)
-- `campaign_data.zip`: Campaign activity data (required for analysis), downloaded from GameBus Campaigns Editor
-- `campaign_desc.xlsx`: Campaign properties, downloaded from GameBus Campaigns Editor
-
-### API Key
-
-The GameBus API key must be stored in a `.env` file in the root directory.
-For the API key, contact GameBus team.
-
-```
+```text
 GAMEBUS_API_KEY=your_api_key_here
 ```
 
-### User Credentials
+Contact the GameBus team if you need an API key.
 
-Create a `users.xlsx` file in the config directory with the following format:
+---
 
+## Participant review
+
+After campaign data are downloaded, the application can show all accounts associated with the campaign.
+
+The researcher can choose which accounts should be included in analysis, for example to exclude test or administrator accounts.
+
+Analysis selection and participant-data extraction are separate decisions.
+
+Excluding an account from analysis:
+
+- does not delete downloaded data;
+- does not modify the GameBus campaign;
+- does not remove participant data that were previously downloaded.
+
+---
+
+# Dataset structure
+
+Each download is stored in its own folder.
+
+The default folder name is:
+
+```text
+CAMPAIGN-ABBREVIATION_CAMPAIGN-ID_YYYY-MM-DD_HHMM
 ```
-email               | password
---------------------|--------------
-user@example.com    | password123
+
+Example:
+
+```text
+HW8_YA_HB_283_2026-09-15_1516/
 ```
 
-Requirements:
-- Must include header row with exact column names: `email` and `password` (lowercase).
-- Do not add `pid` or `player_id`; the tool resolves player IDs automatically.
-- You can use the Excel file with users generated for GameBus campaigns without modifications.
-- During analysis, this file defines the participant cohort. Users not listed here are excluded from analysis even if they appear in campaign exports.
+A dataset may contain:
 
+```text
+HW8_YA_HB_283_2026-09-15_1516/
+├── campaign-283.xlsx
+├── campaign-283-export.zip
+├── campaign_users.json
+├── extraction_manifest.json
+├── cohort_manifest.json
+├── data_raw/
+└── data_analysis/
+```
 
-### Campaign Data
+### `campaign-<id>.xlsx`
 
-For analysis functionality, copy these files from the GameBus Campaigns website:
-- Campaign data provided as either:
-  - `campaign_data.xlsx` (contains activity data for all users), or
-  - CSV files under `config/campaign_data/` (split per sheet).
-- Campaign descriptions provided as either:
-  - `campaign_desc.xlsx` (contains challenge descriptions and levels), or
-  - CSV files under `config/campaign_desc/` (split per sheet).
+Campaign configuration downloaded from GameBus Studio.
 
-### Game Descriptors
+### `campaign-<id>-export.zip`
 
-The `settings.py` file contains a list of valid game descriptors that the system will extract data for. You can modify this list to focus on specific types of activities.
+Campaign analytics downloaded from GameBus Studio.
 
+The export normally contains:
 
-## Analysis Cohort and Participant Filtering
+```text
+1-aggregated-data.csv
+2-activities.csv
+3-navigation-events.csv
+4-notification-events.csv
+5-sensor-events.csv
+```
 
-For analysis, `config/users.xlsx` is the authoritative participant roster.
+### `campaign_users.json`
 
-This means:
+A safe snapshot of the campaign accounts obtained from GameBus Studio.
 
-- Only users listed in `config/users.xlsx` are included in participant counts, activity metrics, active/passive classification, dropout/retention metrics, plots, and reports.
-- Test accounts or extra users that appear in `campaign_data.zip` are excluded from analysis if they are not listed in `users.xlsx`.
-- `users.xlsx` does **not** need to contain `pid`, `player_id`, or GameBus internal IDs. It only needs participant emails and passwords.
-- The tool resolves participant emails to GameBus player IDs through `data_raw/user_email_mapping.txt`.
+It contains only identifiers required for cohort review, such as:
 
-If `data_raw/user_email_mapping.txt` is missing or empty at the start of analysis, the analysis pipeline automatically generates it from `config/users.xlsx`. Therefore, `python pipeline.py --analyze` can still work as long as the API key and user credentials are available.
+- account ID;
+- player ID (PID);
+- email.
 
-If a user in `users.xlsx` cannot be resolved to a GameBus player ID, analysis stops instead of silently including campaign/test accounts.
+Passwords, authentication tokens, password hashes, and similar sensitive fields are not stored here.
 
-## Campaign Dates, Waves, and Analysis Window
+### `extraction_manifest.json`
 
-The analysis window for joining, dropout, and weekly retention is taken from the campaign description file.
+Records how the dataset was obtained and which campaign files belong to it.
 
-Specifically:
+### `cohort_manifest.json`
 
-- analysis start = first day of the first wave in `campaign_desc.xlsx`
-- analysis end = last day of the last wave in `campaign_desc.xlsx`
+Records the researcher-confirmed analysis cohort and participant-data extraction history.
 
-If the reported analysis period is wrong, edit the wave dates in `campaign_desc.xlsx`. Do not fix this in code or by changing configuration constants.
+It is created after participant review.
 
-This is important because weekly retention and joining delay depend directly on the wave dates. For example, if the first wave starts months before the actual pilot started, the report will correctly show a long joining delay based on that Excel configuration.
+### `data_raw/`
 
-## Troubleshooting
+Contains participant data downloaded from the GameBus database.
 
-### Common Issues
+This folder may be empty if participant credentials were not supplied or participant-data extraction was not performed.
 
-1. **Authentication Failures**:
-   - Ensure your API key in `.env` is correct and up-to-date
-   - Check that user credentials in `users.xlsx` are valid
+### `data_analysis/`
 
-2. **Missing Data**:
-   - Verify that the game descriptors you need are enabled in `settings.py`
-   - Check that campaign files are correctly formatted and in the right location
+Contains generated reports, statistics, and figures.
 
-3. **Analysis Errors**:
-   - Ensure both campaign files are present and properly formatted.
-   - Ensure `config/users.xlsx` contains valid participant emails and passwords.
-   - If `data_raw/user_email_mapping.txt` is missing, analysis will try to generate it automatically. This requires a valid API key and valid user credentials.
-   - If analysis stops because some emails cannot be resolved to player IDs, verify that those users exist in GameBus and that their credentials are correct.
-   - If the reported analysis window or joining delay looks wrong, check the wave start/end dates in `config/campaign_desc.xlsx`.
+Running the analysis again replaces the contents of this folder but does not modify the source campaign or participant data.
 
-### Performance Tips
+---
 
-- Reduce the number of users processed in parallel if experiencing rate limiting
-- Comment out unused game descriptors in `settings.py` to speed up extraction
-- Use the DEBUG log level to identify specific issues
+# Analyze existing data
 
-### Security Note
+Use **Analyze existing data** to analyze a dataset created by the current dataset workflow.
 
-Configuration files are tracked by Git, but sensitive content (XLSX files with credentials) is ignored through `.gitignore` rules. Always check that your credentials aren't accidentally committed.
+Select the dataset folder and click **Load dataset**.
+
+Organizer credentials and participant passwords are not required for analysis.
+
+The application displays:
+
+- campaign abbreviation;
+- campaign ID;
+- number of participants selected for analysis;
+- number of available participant-data JSON files;
+- detected campaign files.
+
+---
+
+## Analysis cohort
+
+If the dataset already contains `cohort_manifest.json`, the saved cohort is used.
+
+The cohort can be reviewed or changed before another analysis run.
+
+Changing the analysis cohort does not:
+
+- delete downloaded participant data;
+- trigger additional data extraction;
+- alter the original campaign exports.
+
+If a dataset has `campaign_users.json` but no cohort manifest, the application asks the researcher to review the campaign accounts and creates `cohort_manifest.json` before analysis.
+
+---
+
+## Analysis outputs
+
+Analysis results are written inside the selected dataset:
+
+```text
+data_analysis/
+```
+
+The analysis includes, where the required data are available:
+
+### Campaign activity
+
+- activity type distributions;
+- activity over time;
+- awarded points;
+- participant activity distributions;
+- activity heatmaps;
+- activity by weekday and hour;
+- engagement over time;
+- wave comparisons.
+
+### Participation and engagement
+
+- active/passive participant summaries;
+- joining;
+- activity span;
+- dropout;
+- weekly retention;
+- churn-related metrics.
+
+### Campaign configuration
+
+- challenge analysis;
+- task analysis;
+- activity completion;
+- tasks by provider;
+- task completion over time and by participant;
+- rewards by challenge and rule.
+
+### Participant data
+
+When relevant participant data are available in `data_raw/`, additional analyses can include:
+
+- steps;
+- geofence activity;
+- movement summaries and visualizations.
+
+The generated textual report is saved as:
+
+```text
+data_analysis/analysis_report.txt
+```
+
+Additional figures and statistics are stored in the same dataset-specific `data_analysis/` directory and its subdirectories.
+
+---
+
+# Cohort semantics
+
+The application distinguishes between:
+
+1. **selected for analysis**
+2. **selected for participant-data extraction**
+3. **participant data successfully downloaded**
+
+These states are intentionally independent.
+
+For example, participant data may already have been downloaded while the researcher later decides to exclude that participant from a particular analysis.
+
+Changing the analysis cohort does not erase extraction history.
+
+---
+
+# Security and credentials
+
+The application follows several rules intended to keep credentials separate from research datasets:
+
+- participant passwords are never stored in dataset manifests;
+- participant credentials XLSX files are not copied into datasets;
+- organizer passwords can optionally be stored using the operating-system keyring;
+- dataset files contain only the identifiers and metadata needed for reproducibility and analysis.
+
+Do not commit `.env`, credentials files, session cookies, or participant data to Git.
+
+---
+
+# Earlier command-line workflow — v1.2
+
+GameBus Data Analyzer v1.2 used the original command-line workflow based on files such as:
+
+```text
+config/users.xlsx
+config/campaign_data.zip
+config/campaign_desc.xlsx
+data_raw/
+```
+
+and commands such as:
+
+```powershell
+python pipeline.py --extract
+python pipeline.py --analyze
+```
+
+That version is preserved in:
+
+```text
+tag:    v1.2
+branch: release/1.2
+```
+
+Use v1.2 for datasets prepared specifically for that earlier folder structure.
+
+The current Streamlit application uses the dataset-folder workflow described above.
+
+---
+
+# Running tests
+
+Run the full test suite from the repository root:
+
+```powershell
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+---
+
+# Project structure
+
+```text
+gamebus-data-analyzer/
+├── src/
+│   ├── acquisition/       # Campaign and participant-data acquisition
+│   ├── analysis/          # Analysis and reporting
+│   ├── datasets/          # Dataset layout, manifests and validation
+│   ├── extraction/        # GameBus participant-data extraction
+│   ├── ui/                # Streamlit UI
+│   └── utils/
+├── tests/
+├── datasets/              # Default location for datasets
+├── streamlit_app.py       # Streamlit entry point
+├── pipeline.py            # Earlier/command-line entry point
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## Game descriptors
+
+Participant-data extraction uses the GameBus game descriptors configured in:
+
+```text
+config/settings.py
+```
+
+If GameBus introduces new descriptors, this list may need to be updated.
+
+The same configuration can also be used to restrict which types of participant data are extracted.
+
+---
 
 ## License
 
-This project is licensed under the CC-BY-4.0 License.
-
-## Visualization color palettes and accessibility
-
-- Default theme: Seaborn "colorblind" palette with whitegrid background for readability.
-- Categorical charts (bars, lines with distinct series):
-  - BAR_COLORMAP = tab20 for many distinct categories.
-  - LINE_COLORMAP = tab10 for up to ~10 lines; pandas/seaborn will cycle through the colorblind-friendly palette.
-- Sequential data (heatmaps showing magnitude):
-  - SEQUENTIAL_HEATMAP_COLORMAP = viridis (perceptually uniform, colorblind-friendly).
-- Diverging data (values around a center, e.g., correlations):
-  - CORRELATION_HEATMAP_COLORMAP = coolwarm; when plotting correlations, set center=0.
-- Single-series bars (e.g., counts over time):
-  - SINGLE_SERIES_COLOR = first color from the colorblind palette, used for consistent, accessible single-color bars.
-
-Where to change:
-- See src\analysis\data_analysis.py near the top (plot style and colormap constants). Update those constants to customize palettes project-wide.
-
-Example to override in code (optional per script):
-- In your analysis script, before plotting:
-  - import seaborn as sns
-  - sns.set_palette("deep")  # or any seaborn palette name
-  - Or change BAR_COLORMAP/SEQUENTIAL_HEATMAP_COLORMAP constants in data_analysis.py.
-
-## Change Log
-- 1.2 (2026-05-18):
-  - Participant filtering now uses `config/users.xlsx` as the authoritative analysis cohort.
-    - Test accounts and campaign users not listed in `users.xlsx` are excluded from analysis.
-    - `data_raw/user_email_mapping.txt` is generated automatically at analysis start if missing.
-    - Active/passive metrics are now descriptor-based for GameBus, Nutrida, and Combined scopes.
-    - Added scoped active/passive pie charts:
-      - `player_active_vs_passive_pie_gamebus.png`
-      - `player_active_vs_passive_pie_nutrida.png`
-      - `player_active_vs_passive_pie_combined.png`
-    - Fixed active/passive pie chart legend layout.
-    - Added real dropout and weekly retention metrics.
-    - Renamed old dropout-style metrics to activity-span metrics where appropriate.
-    - Clarified that campaign wave dates from `campaign_desc.xlsx` define the retention/dropout analysis window.
-    - Added standard deviations to usage summary metrics.
-    - 
-- 1.1 (2025-12-03): Analysis, visualization, and logging improvements
-  - New analyses using rewardedParticipations:
-    - Group by Challenge name and by Rule name with figures:
-      - `rewards_count_by_challenge.png`, `points_by_challenge.png`
-      - `rewards_count_by_rule.png`, `points_by_rule.png`
-  - Nested analyses:
-    - Per activity type: total rewarded points by challenge → files under `data_analysis/by_type/` (e.g., `points_by_challenge_type_<TYPE>.png`)
-    - Per challenge: total rewarded points by rule → files under `data_analysis/by_challenge/` (e.g., `points_by_rule_challenge_<CHALLENGE>.png`)
-  - Churn plots:
-    - `churn_counts_over_time.png`
-    - `churn_rate_over_time.png`
-- 1.0: Initial release
+See `LICENSE`.

@@ -7,6 +7,7 @@ data_analysis*/
 *.xlsx
 old/
 api docs/
+/datasets/
 
 
 # Ignore data files
@@ -54,3 +55,4 @@ logs/
 .vscode/
 *.swp
 *.swo
+/config/**/*.zip

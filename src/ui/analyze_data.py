@@ -291,15 +291,13 @@ def _render_new_cohort_review(
 
     if snapshot is None:
         st.warning(
-            "This dataset has no saved participant "
-            "cohort and no campaign account snapshot."
+            "This dataset has no saved participant cohort and no campaign account snapshot."
         )
 
         st.info(
-            "For older datasets, participant accounts "
-            "cannot always be reconstructed completely "
-            "without GameBus Studio. We will add a "
-            "legacy fallback separately."
+            "This folder does not contain the participant metadata required by the current UI workflow. "
+            "Download the campaign data again with Get data, or use GameBus Data Analyzer v1.2.0 for data prepared "
+            "for the earlier command-line workflow."
         )
 
         return

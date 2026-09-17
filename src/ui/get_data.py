@@ -380,6 +380,7 @@ def _load_saved_cohort_state(
     dict[str, bool],
     dict[str, bool],
     dict[str, bool],
+    dict[str, bool],
 ]:
     selected_by_pid: dict[
         str,
@@ -387,6 +388,11 @@ def _load_saved_cohort_state(
     ] = {}
 
     selected_by_email: dict[
+        str,
+        bool,
+    ] = {}
+
+    credentials_by_pid: dict[
         str,
         bool,
     ] = {}
@@ -400,6 +406,7 @@ def _load_saved_cohort_state(
         return (
             selected_by_pid,
             selected_by_email,
+            credentials_by_pid,
             extracted_by_pid,
         )
 
@@ -437,6 +444,15 @@ def _load_saved_cohort_state(
                 pid_text
             ] = selected
 
+            credentials_by_pid[
+                pid_text
+            ] = bool(
+                participant.get(
+                    "credentials_available",
+                    False,
+                )
+            )
+
             extracted_by_pid[
                 pid_text
             ] = bool(
@@ -456,6 +472,7 @@ def _load_saved_cohort_state(
     return (
         selected_by_pid,
         selected_by_email,
+        credentials_by_pid,
         extracted_by_pid,
     )
 
@@ -515,6 +532,7 @@ def _render_participant_review(
         (
             saved_selection_by_pid,
             saved_selection_by_email,
+            saved_credentials_by_pid,
             saved_extracted_by_pid,
         ) = _load_saved_cohort_state(
             cohort_manifest_path
@@ -648,9 +666,7 @@ def _render_participant_review(
                         st.column_config.CheckboxColumn(
                             "Credentials",
                             help=(
-                                "Participant credentials "
-                                "are available for "
-                                "additional data extraction."
+                                "Participant credentials are available in the currently uploaded credentials file."
                             ),
                         )
                     ),
@@ -687,7 +703,15 @@ def _render_participant_review(
                     ]
                 )
 
-                credentials_available = bool(
+
+                pid_text = str(
+                    user.get(
+                        "pid",
+                        "",
+                    )
+                )
+
+                current_credentials_available = bool(
                     edited_table.iloc[
                         index
                     ][
@@ -695,11 +719,16 @@ def _render_participant_review(
                     ]
                 )
 
-                pid_text = str(
-                    user.get(
-                        "pid",
-                        "",
+                saved_credentials_available = (
+                    saved_credentials_by_pid.get(
+                        pid_text,
+                        False,
                     )
+                )
+
+                credentials_available = (
+                        current_credentials_available
+                        or saved_credentials_available
                 )
 
                 was_extracted = (
@@ -710,14 +739,11 @@ def _render_participant_review(
                 )
 
                 if was_extracted:
-                    selected_for_extraction = (
-                        True
-                    )
-
+                    selected_for_extraction = True
                 else:
                     selected_for_extraction = (
-                        selected
-                        and credentials_available
+                            selected
+                            and current_credentials_available
                     )
 
                 participants.append(
@@ -1132,7 +1158,8 @@ def _render_participant_extraction(
             )
 
             st.error(
-                "Participant data extraction failed: {exc}"
+                "Participant data extraction failed: "
+                f"{exc}"
             )
 
 

@@ -224,7 +224,7 @@ def run_dataset_analysis(
         _notify(
             progress_callback,
             "loading_participant_data",
-            "Loading participant-level data",
+            "Loading participant data",
         )
 
         try:
@@ -237,7 +237,7 @@ def run_dataset_analysis(
 
         except Exception as exc:
             raise DatasetAnalysisError(
-                "Could not load participant-level "
+                "Could not load participant "
                 f"data: {exc}"
             ) from exc
 

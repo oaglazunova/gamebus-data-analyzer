@@ -7,7 +7,7 @@ import hashlib
 
 import pandas as pd
 
-from typing import Any, Dict
+from typing import Any, Dict, Callable
 from datetime import datetime, timezone
 
 from src.trajectory.common import (
@@ -51,6 +51,30 @@ from src.trajectory.engagement import (
     explicit_engagement_mask,
 )
 
+
+
+TrajectoryProgressCallback = Callable[
+    [
+        str,
+        str,
+    ],
+    None,
+]
+
+
+def _notify_progress(
+    progress_callback: (
+        TrajectoryProgressCallback
+        | None
+    ),
+    stage: str,
+    message: str,
+) -> None:
+    if progress_callback is not None:
+        progress_callback(
+            stage,
+            message,
+        )
 
 
 def _validate_inputs(
@@ -262,6 +286,17 @@ def _write_audit_manifest(
                 config
                 .case_export_max_cases
             ),
+
+            "analysis_participant_ids": (
+                sorted(
+                    config.analysis_participant_ids
+                )
+                if (
+                        config.analysis_participant_ids
+                        is not None
+                )
+                else None
+            ),
         },
 
         "output_directory": (
@@ -382,6 +417,32 @@ def _build_audit_summary(
     cases = results[
         "case_export"
     ]
+
+    observation_window_result = (
+        results.get(
+            "observation_window",
+            {},
+        )
+    )
+
+    cohort_result = (
+        observation_window_result.get(
+            "cohort",
+            {},
+        )
+        if isinstance(
+            observation_window_result,
+            dict,
+        )
+        else {}
+    )
+
+    cohort_source = (
+        cohort_result.get(
+            "source",
+            "unavailable",
+        )
+    )
 
     # -------------------------------------------------
     # Cohort
@@ -626,8 +687,8 @@ def _build_audit_summary(
                 - explicit_participants
             ),
 
-            "cohort_membership_evidence": (
-                "campaign_export_only"
+            "cohort_source": (
+                cohort_source
             ),
         },
 
@@ -748,6 +809,11 @@ def _build_audit_summary(
 
 def run_trajectory_audit(
     config: TrajectoryAuditConfig | None = None,
+    *,
+    progress_callback: (
+        TrajectoryProgressCallback
+        | None
+    ) = None,
 ) -> Dict[str, Any]:
     """
     Run the complete Trajectory Audit.
@@ -768,6 +834,12 @@ def run_trajectory_audit(
     config = (
         config
         or TrajectoryAuditConfig()
+    )
+
+    _notify_progress(
+        progress_callback,
+        "validating",
+        "Validating trajectory audit inputs",
     )
 
     _validate_inputs(
@@ -810,9 +882,16 @@ def run_trajectory_audit(
         "=" * 60
     )
 
+
+
     # -------------------------------------------------
     # 1. Data profile
     # -------------------------------------------------
+    _notify_progress(
+        progress_callback,
+        "data_profile",
+        "Profiling campaign data",
+    )
 
     print()
     print(
@@ -828,6 +907,11 @@ def run_trajectory_audit(
     # -------------------------------------------------
     # 2. Canonical events
     # -------------------------------------------------
+    _notify_progress(
+        progress_callback,
+        "event_normalization",
+        "Normalizing campaign events",
+    )
 
     print()
     print(
@@ -843,6 +927,11 @@ def run_trajectory_audit(
     # -------------------------------------------------
     # 3. Participation episodes
     # -------------------------------------------------
+    _notify_progress(
+        progress_callback,
+        "participation_episodes",
+        "Reconstructing participation episodes",
+    )
 
     print()
     print(
@@ -860,6 +949,11 @@ def run_trajectory_audit(
     # -------------------------------------------------
     # 4. Observation window
     # -------------------------------------------------
+    _notify_progress(
+        progress_callback,
+        "observation_window",
+        "Determining the observation window",
+    )
 
     print()
     print(
@@ -881,6 +975,12 @@ def run_trajectory_audit(
         "[5/11] ParticipantState(t)"
     )
 
+    _notify_progress(
+        progress_callback,
+        "participant_state",
+        "Building daily participant states",
+    )
+
     results[
         "participant_state_daily"
     ] = (
@@ -898,6 +998,12 @@ def run_trajectory_audit(
         "[6/11] Inactivity gaps"
     )
 
+    _notify_progress(
+        progress_callback,
+        "inactivity_gaps",
+        "Analyzing inactivity gaps",
+    )
+
     results[
         "inactivity_gaps"
     ] = run_inactivity_gap_analysis(
@@ -911,6 +1017,12 @@ def run_trajectory_audit(
     print()
     print(
         "[7/11] Inactivity threshold transitions"
+    )
+
+    _notify_progress(
+        progress_callback,
+        "threshold_transitions",
+        "Detecting inactivity threshold transitions",
     )
 
     results[
@@ -930,6 +1042,12 @@ def run_trajectory_audit(
         "[8/11] Domain/tool engagement"
     )
 
+    _notify_progress(
+        progress_callback,
+        "domain_tool_engagement",
+        "Analyzing domain and tool engagement",
+    )
+
     results[
         "domain_tool_engagement"
     ] = run_domain_tool_engagement(
@@ -943,6 +1061,12 @@ def run_trajectory_audit(
     print()
     print(
         "[9/11] Data quality"
+    )
+
+    _notify_progress(
+        progress_callback,
+        "data_quality",
+        "Assessing trajectory data quality",
     )
 
     results[
@@ -960,6 +1084,12 @@ def run_trajectory_audit(
         "[10/11] Candidate patterns"
     )
 
+    _notify_progress(
+        progress_callback,
+        "candidate_patterns",
+        "Detecting candidate trajectory patterns",
+    )
+
     results[
         "candidate_patterns"
     ] = run_candidate_patterns(
@@ -975,6 +1105,12 @@ def run_trajectory_audit(
         "[11/11] Case exports and plots"
     )
 
+    _notify_progress(
+        progress_callback,
+        "case_export",
+        "Generating participant cases and plots",
+    )
+
     results[
         "case_export"
     ] = run_case_export(
@@ -984,6 +1120,12 @@ def run_trajectory_audit(
     print()
     print(
         "Writing audit summary"
+    )
+
+    _notify_progress(
+        progress_callback,
+        "summary",
+        "Writing audit summary",
     )
 
     audit_summary = (
@@ -1009,6 +1151,12 @@ def run_trajectory_audit(
     print()
     print(
         "Writing audit manifest"
+    )
+
+    _notify_progress(
+        progress_callback,
+        "manifest",
+        "Writing reproducibility manifest",
     )
 
     manifest_path = (
@@ -1058,6 +1206,12 @@ def run_trajectory_audit(
 
     print(
         summary_path
+    )
+
+    _notify_progress(
+        progress_callback,
+        "complete",
+        "Trajectory audit complete",
     )
 
     return results

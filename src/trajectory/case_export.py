@@ -453,7 +453,7 @@ def _filter_participant(
     participant_id: int,
 ) -> pd.DataFrame:
     """
-    Filter any participant-level table safely.
+    Filter any participant table safely.
     """
 
     if (

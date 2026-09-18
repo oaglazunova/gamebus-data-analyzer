@@ -804,6 +804,56 @@ def _deduplicate_events(
     return result
 
 
+def _filter_to_analysis_cohort(
+    events: pd.DataFrame,
+    config: TrajectoryAuditConfig,
+) -> pd.DataFrame:
+    """
+    Restrict normalized events to an explicitly
+    supplied analysis cohort.
+
+    When no explicit cohort is supplied, preserve
+    the original standalone audit behavior.
+    """
+    if (
+        config.analysis_participant_ids
+        is None
+    ):
+        return events
+
+    if events.empty:
+        return events
+
+    allowed_ids = set(
+        int(
+            participant_id
+        )
+        for participant_id
+        in config.analysis_participant_ids
+    )
+
+    participant_ids = pd.to_numeric(
+        events[
+            "participant_id"
+        ],
+        errors="coerce",
+    ).astype(
+        "Int64"
+    )
+
+    return (
+        events.loc[
+            participant_ids.isin(
+                allowed_ids
+            )
+        ]
+        .copy()
+        .reset_index(
+            drop=True
+        )
+    )
+
+
 def build_normalized_events(
     config: TrajectoryAuditConfig,
 ) -> pd.DataFrame:
@@ -902,6 +952,13 @@ def build_normalized_events(
 
     normalized = _deduplicate_events(
         raw_events
+    )
+
+    normalized = (
+        _filter_to_analysis_cohort(
+            normalized,
+            config,
+        )
     )
 
     # -------------------------------------------------

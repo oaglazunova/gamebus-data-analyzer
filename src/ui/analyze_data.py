@@ -262,7 +262,7 @@ def _show_dataset_summary(
             inspection.raw_data_dir.exists()
         ):
             st.write(
-                "Participant-level data:"
+                "Participant data:"
             )
 
             st.code(
@@ -529,9 +529,7 @@ def _render_existing_cohort(
         )
 
         st.caption(
-            "Changing this selection does not "
-            "delete downloaded data and does not "
-            "trigger participant-level extraction."
+            "Changing this selection does not delete downloaded data and does not trigger participant extraction."
         )
 
         rows = []
@@ -601,8 +599,7 @@ def _render_existing_cohort(
                     st.column_config.CheckboxColumn(
                         "Participant data",
                         help=(
-                            "Participant-level data "
-                            "were previously extracted."
+                            "Participant data were previously extracted."
                         ),
                     )
                 ),

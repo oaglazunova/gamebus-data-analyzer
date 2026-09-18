@@ -31,9 +31,9 @@ def _core_quality_counts(
     audit_dir: Path,
 ) -> dict[str, int | None]:
     """
-    Read participant-level quality states.
+    Read participant quality states.
 
-    If the participant-level CSV is unavailable,
+    If the participant CSV is unavailable,
     return NA-compatible values rather than
     fabricating counts.
     """
@@ -368,7 +368,7 @@ def _campaign_row(
         ),
 
         # -----------------------------------------
-        # Participant-level core quality
+        # Participant core quality
         # -----------------------------------------
 
         "quality_sufficient": (

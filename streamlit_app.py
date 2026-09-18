@@ -8,6 +8,9 @@ from src.ui.analyze_data import (
 from src.ui.get_data import (
     render_get_data_page,
 )
+from src.ui.trajectory_audit import (
+    render_trajectory_audit_page,
+)
 
 
 st.set_page_config(
@@ -22,10 +25,12 @@ def main() -> None:
         "Action",
         [
             "Get data",
-            "Analyze existing data",
+            "Analyze",
+            "Trajectory audit",
         ],
         horizontal=True,
         label_visibility="collapsed",
+        key="main_action",
     )
 
     st.divider()
@@ -33,8 +38,11 @@ def main() -> None:
     if action == "Get data":
         render_get_data_page()
 
-    else:
+    elif action == "Analyze":
         render_analyze_data_page()
+
+    else:
+        render_trajectory_audit_page()
 
 
 if __name__ == "__main__":

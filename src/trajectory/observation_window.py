@@ -145,6 +145,25 @@ def _export_cohort(
         participant IDs observed in normalized events.
     """
 
+    if (
+        config.analysis_participant_ids
+        is not None
+    ):
+        ids = sorted(
+            int(
+                participant_id
+            )
+            for participant_id
+            in config.analysis_participant_ids
+        )
+
+        return {
+            "source": (
+                "cohort_manifest"
+            ),
+            "participant_ids": ids,
+        }
+
     export_data, _ = load_campaign_export(
         config.campaign_data_path
     )

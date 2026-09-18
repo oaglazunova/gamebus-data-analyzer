@@ -351,7 +351,7 @@ def _core_quality_state(
     quality_flags: List[str],
 ) -> str:
     """
-    Determine the status of participant-level
+    Determine the status of participant
     trajectory evidence.
 
     Distinguish between:
@@ -410,8 +410,7 @@ def build_data_quality_state(
     Dict[str, Any],
 ]:
     """
-    Build participant-level and campaign-level
-    data-quality state.
+    Build participant and campaign data-quality state.
     """
 
     prepared = _prepare_events(

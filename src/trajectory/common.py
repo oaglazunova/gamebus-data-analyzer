@@ -79,6 +79,8 @@ class TrajectoryAuditConfig:
     # exported by the Trajectory Audit.
     case_export_max_cases: int = 10
 
+    analysis_participant_ids: set[int] | None = None
+
 
 def jsonable(value: Any) -> Any:
     """

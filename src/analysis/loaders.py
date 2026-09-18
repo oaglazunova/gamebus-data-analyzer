@@ -367,7 +367,7 @@ def load_json_files(
     ],
 ]:
     """
-    Load participant-level JSON data.
+    Load participant JSON data.
 
     Dataset-aware usage:
 

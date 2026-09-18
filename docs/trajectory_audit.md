@@ -255,9 +255,9 @@ They are **not classifiers** and should not be interpreted as:
 
 Candidate behavioral patterns are suppressed where core trajectory evidence is insufficient.
 
-## 12. Participant-level data-quality state
+## 12. Participant data-quality state
 
-Participant-level core trajectory evidence is summarized using four states.
+Participant core trajectory evidence is summarized using four states.
 
 | State                              | Interpretation                                                                                                 |
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -305,7 +305,7 @@ All five campaigns complete the full audit pipeline and produce:
 * inactivity gaps;
 * inactivity-threshold transitions;
 * domain/tool trajectories;
-* participant-level data-quality states;
+* participant data-quality states;
 * candidate patterns;
 * case exports;
 * audit summaries;

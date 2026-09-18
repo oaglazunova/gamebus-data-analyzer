@@ -197,11 +197,21 @@ class TestTrajectoryAuditRun(
 
             self.assertEqual(
                 result.run_dir.name,
-                "TEST_283_2026-09-17_153000",
+                "2026-09-17_153000",
             )
 
             self.assertEqual(
-                result.run_dir.parent,
+                result.run_dir.parent.name,
+                "audits",
+            )
+
+            self.assertEqual(
+                result.run_dir.parent.parent.name,
+                "campaign_283",
+            )
+
+            self.assertEqual(
+                result.run_dir.parent.parent.parent,
                 output_root.resolve(),
             )
 
@@ -374,13 +384,94 @@ class TestTrajectoryAuditRun(
 
             self.assertEqual(
                 second.run_dir.name,
-                "TEST_283_2026-09-17_153000_2",
+                "2026-09-17_153000_2",
+            )
+
+            self.assertEqual(
+                first.run_dir.parent,
+                second.run_dir.parent,
+            )
+
+            self.assertEqual(
+                second.run_dir.parent.name,
+                "audits",
+            )
+
+            self.assertEqual(
+                second.run_dir.parent.parent.name,
+                "campaign_283",
             )
 
             self.assertEqual(
                 mocked_audit.call_count,
                 2,
             )
+
+    def test_campaign_id_is_required(
+            self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(
+                tmp
+            )
+
+            campaign_zip = (
+                    root
+                    / "campaign-export.zip"
+            )
+
+            campaign_xlsx = (
+                    root
+                    / "campaign.xlsx"
+            )
+
+            _write_campaign_zip(
+                campaign_zip
+            )
+
+            with pd.ExcelWriter(
+                    campaign_xlsx,
+                    engine="openpyxl",
+            ) as writer:
+                pd.DataFrame(
+                    {
+                        "abbreviation": [
+                            "TEST",
+                        ],
+                    }
+                ).to_excel(
+                    writer,
+                    sheet_name="campaigns",
+                    index=False,
+                )
+
+            with self.assertRaisesRegex(
+                    TrajectoryAuditRunError,
+                    "requires a valid GameBus campaign ID",
+            ):
+                run_trajectory_audit_snapshot(
+                    campaign_data_path=(
+                        campaign_zip
+                    ),
+                    campaign_description_path=(
+                        campaign_xlsx
+                    ),
+                    candidate_participant_ids=[
+                        497,
+                        498,
+                    ],
+                    selected_participant_ids=[
+                        497,
+                    ],
+                    source_type=(
+                        "uploaded_files"
+                    ),
+                    output_root=(
+                            root
+                            / "trajectory_audits"
+                    ),
+                )
+
 
     def test_selected_participants_must_be_candidates(
         self,

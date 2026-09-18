@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import tkinter as tk
 from tkinter import filedialog
 
@@ -55,6 +56,12 @@ UPLOAD_DESCRIPTION_KEY = (
 )
 UPLOAD_DATA_KEY = (
     "trajectory_upload_data"
+)
+RESULT_VIEW_KEY = (
+    "trajectory_result_view"
+)
+PARTICIPANT_VIEW_KEY = (
+    "trajectory_result_participant"
 )
 
 
@@ -155,14 +162,33 @@ def _remove_loaded_source() -> None:
         None,
     )
 
-    st.session_state.pop(
-        LAST_RUN_STATE_KEY,
-        None,
-    )
-
 
 def _source_mode_changed() -> None:
     _remove_loaded_source()
+
+    source_mode = st.session_state.get(
+        SOURCE_MODE_KEY
+    )
+
+    if source_mode not in {
+        "Upload campaign files",
+        "Fetch campaign data from GameBus",
+    }:
+        return
+
+    try:
+        settings = load_settings()
+
+        settings[
+            "trajectory_source_mode"
+        ] = source_mode
+
+        save_settings(
+            settings
+        )
+
+    except Exception:
+        pass
 
 
 def _load_saved_password(
@@ -251,6 +277,27 @@ def _remember_gamebus_settings(
 
 def _initialize_state() -> dict:
     settings = load_settings()
+
+    if (
+        SOURCE_MODE_KEY
+        not in st.session_state
+    ):
+        saved_source_mode = settings.get(
+            "trajectory_source_mode",
+            "Upload campaign files",
+        )
+
+        if saved_source_mode not in {
+            "Upload campaign files",
+            "Fetch campaign data from GameBus",
+        }:
+            saved_source_mode = (
+                "Upload campaign files"
+            )
+
+        st.session_state[
+            SOURCE_MODE_KEY
+        ] = saved_source_mode
 
     if (
         OUTPUT_ROOT_KEY
@@ -905,7 +952,194 @@ def _render_cohort_editor(
     )
 
 
-def _show_run_summary(
+def _build_participant_status_table(
+    result,
+) -> pd.DataFrame:
+    participant_ids = (
+        _selected_participant_ids(
+            result
+        )
+    )
+
+    columns = [
+        "PID",
+        "Current state",
+        "Last explicit engagement",
+        "Days since engagement",
+        "Candidate patterns",
+        "Data quality",
+    ]
+
+    if not participant_ids:
+        return pd.DataFrame(
+            columns=columns
+        )
+
+    state = _read_result_table(
+        result,
+        "participant_state_daily.csv",
+    )
+
+    quality = _read_result_table(
+        result,
+        "data_quality.csv",
+    )
+
+    patterns = _read_result_table(
+        result,
+        "candidate_patterns.csv",
+    )
+
+    rows = []
+
+    for participant_id in participant_ids:
+        participant_state = _participant_rows(
+            state,
+            participant_id,
+        )
+
+        participant_quality = _participant_rows(
+            quality,
+            participant_id,
+        )
+
+        participant_patterns = _participant_rows(
+            patterns,
+            participant_id,
+        )
+
+        current_state = "Unknown"
+        last_engagement = "—"
+        days_since = "—"
+
+        if not participant_state.empty:
+            participant_state = (
+                participant_state.copy()
+            )
+
+            participant_state[
+                "date"
+            ] = pd.to_datetime(
+                participant_state[
+                    "date"
+                ],
+                errors="coerce",
+            )
+
+            participant_state = (
+                participant_state.sort_values(
+                    "date"
+                )
+            )
+
+            current = (
+                participant_state.iloc[-1]
+            )
+
+            raw_state = current.get(
+                "engagement_state"
+            )
+
+            if pd.notna(
+                raw_state
+            ):
+                current_state = str(
+                    raw_state
+                )
+
+            raw_last = current.get(
+                "last_explicit_engagement_date"
+            )
+
+            if pd.notna(
+                raw_last
+            ):
+                parsed_last = pd.to_datetime(
+                    raw_last,
+                    errors="coerce",
+                )
+
+                if pd.notna(
+                    parsed_last
+                ):
+                    last_engagement = (
+                        parsed_last
+                        .date()
+                        .isoformat()
+                    )
+
+                else:
+                    last_engagement = str(
+                        raw_last
+                    )
+
+            raw_days = current.get(
+                "days_since_last_explicit_engagement"
+            )
+
+            if pd.notna(
+                raw_days
+            ):
+                try:
+                    days_since = int(
+                        float(
+                            raw_days
+                        )
+                    )
+
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+                    days_since = str(
+                        raw_days
+                    )
+
+        quality_state = "Unknown"
+
+        if not participant_quality.empty:
+            raw_quality = (
+                participant_quality
+                .iloc[0]
+                .get(
+                    "core_quality_state"
+                )
+            )
+
+            if pd.notna(
+                raw_quality
+            ):
+                quality_state = str(
+                    raw_quality
+                )
+
+        rows.append(
+            {
+                "PID": participant_id,
+                "Current state": current_state,
+                "Last explicit engagement": (
+                    last_engagement
+                ),
+                "Days since engagement": (
+                    days_since
+                ),
+                "Candidate patterns": len(
+                    participant_patterns
+                ),
+                "Data quality": (
+                    quality_state
+                ),
+            }
+        )
+
+    return pd.DataFrame(
+        rows,
+        columns=columns,
+    )
+
+
+
+def _show_campaign_overview(
     result,
 ) -> None:
     summary = (
@@ -930,13 +1164,17 @@ def _show_run_summary(
         {},
     )
 
-    st.success(
-        "Trajectory audit completed."
+    st.subheader(
+        "Campaign overview"
     )
 
-    col1, col2, col3, col4 = (
+    # -------------------------------------------------
+    # Main audit metrics
+    # -------------------------------------------------
+
+    col1, col2, col3, col4, col5 = (
         st.columns(
-            4
+            5
         )
     )
 
@@ -951,7 +1189,7 @@ def _show_run_summary(
 
     with col2:
         st.metric(
-            "Observed participants",
+            "Observed",
             cohort.get(
                 "participants_with_any_observed_event",
                 0,
@@ -960,6 +1198,15 @@ def _show_run_summary(
 
     with col3:
         st.metric(
+            "Explicit engagement",
+            cohort.get(
+                "participants_with_explicit_engagement",
+                0,
+            ),
+        )
+
+    with col4:
+        st.metric(
             "Candidate patterns",
             patterns.get(
                 "rows",
@@ -967,7 +1214,7 @@ def _show_run_summary(
             ),
         )
 
-    with col4:
+    with col5:
         st.metric(
             "Case exports",
             cases.get(
@@ -976,15 +1223,513 @@ def _show_run_summary(
             ),
         )
 
-    st.write(
-        "Audit saved to:"
+
+    # -------------------------------------------------
+    # Participant status
+    # -------------------------------------------------
+
+    st.subheader(
+        "Participant status"
     )
 
-    st.code(
-        str(
-            result.run_dir
+    participant_status = (
+        _build_participant_status_table(
+            result
         )
     )
+
+    if participant_status.empty:
+        st.info(
+            "No participant status information "
+            "is available for this audit."
+        )
+
+    else:
+        st.dataframe(
+            participant_status,
+            hide_index=True,
+            use_container_width=True,
+        )
+
+
+    # -------------------------------------------------
+    # Campaign engagement over time
+    # -------------------------------------------------
+
+    st.subheader(
+        "Engagement over time"
+    )
+
+    engagement_plot = (
+        result.results_dir
+        / "plots"
+        / "cohort_engagement_over_time.png"
+    )
+
+    if engagement_plot.is_file():
+        st.image(
+            str(
+                engagement_plot
+            ),
+            use_container_width=True,
+        )
+
+    else:
+        st.info(
+            "No cohort engagement plot was produced "
+            "for this audit."
+        )
+
+    # -------------------------------------------------
+    # Domain / tool engagement
+    # -------------------------------------------------
+
+    st.subheader(
+        "Domain and tool engagement"
+    )
+
+    domain_tool_plot = (
+        result.results_dir
+        / "plots"
+        / "cohort_domain_tool_engagement.png"
+    )
+
+    if domain_tool_plot.is_file():
+        st.image(
+            str(
+                domain_tool_plot
+            ),
+            use_container_width=True,
+        )
+
+    else:
+        st.info(
+            "No cohort domain/tool plot was produced "
+            "for this audit."
+        )
+
+    # -------------------------------------------------
+    # Candidate trajectory patterns
+    # -------------------------------------------------
+
+    st.subheader(
+        "Candidate trajectory patterns"
+    )
+
+    candidate_patterns_path = (
+        result.results_dir
+        / "candidate_patterns.csv"
+    )
+
+    if candidate_patterns_path.is_file():
+        candidate_patterns = pd.read_csv(
+            candidate_patterns_path
+        )
+
+        if candidate_patterns.empty:
+            st.info(
+                "No candidate trajectory patterns "
+                "were detected."
+            )
+
+        else:
+            display_columns = [
+                column
+                for column in [
+                    "participant_id",
+                    "pattern_type",
+                    "subject",
+                    "detected_at",
+                    "status",
+                    "right_censored",
+                    "core_quality_state",
+                ]
+                if column
+                in candidate_patterns.columns
+            ]
+
+            display_table = (
+                candidate_patterns[
+                    display_columns
+                ]
+                .copy()
+            )
+
+            rename_columns = {
+                "participant_id": "PID",
+                "pattern_type": "Pattern",
+                "subject": "Subject",
+                "detected_at": "Detected at",
+                "status": "Status",
+                "right_censored": "Right-censored",
+                "core_quality_state": "Data quality",
+            }
+
+            display_table = (
+                display_table.rename(
+                    columns=rename_columns
+                )
+            )
+
+            st.dataframe(
+                display_table,
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    else:
+        st.info(
+            "Candidate-pattern output was not found."
+        )
+
+    # -------------------------------------------------
+    # Saved audit
+    # -------------------------------------------------
+
+    with st.expander(
+        "Audit files",
+        expanded=False,
+    ):
+        st.write(
+            "Audit saved to:"
+        )
+
+        st.code(
+            str(
+                result.run_dir
+            )
+        )
+
+        st.caption(
+            "The tables and figures shown above are "
+            "also saved inside the audit results folder."
+        )
+
+
+
+def _selected_participant_ids(
+    result,
+) -> list[int]:
+    """
+    Read the participants included in this audit run.
+    """
+
+    if not result.cohort_path.is_file():
+        return []
+
+    try:
+        cohort = json.loads(
+            result.cohort_path.read_text(
+                encoding="utf-8"
+            )
+        )
+
+    except Exception:
+        return []
+
+    participant_ids = []
+
+    for participant in cohort.get(
+        "participants",
+        [],
+    ):
+        if not participant.get(
+            "included",
+            False,
+        ):
+            continue
+
+        try:
+            participant_ids.append(
+                int(
+                    participant[
+                        "pid"
+                    ]
+                )
+            )
+
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
+            continue
+
+    return sorted(
+        set(
+            participant_ids
+        )
+    )
+
+
+def _read_result_table(
+    result,
+    filename: str,
+) -> pd.DataFrame:
+    path = (
+        result.results_dir
+        / filename
+    )
+
+    if not path.is_file():
+        return pd.DataFrame()
+
+    try:
+        return pd.read_csv(
+            path
+        )
+
+    except Exception:
+        return pd.DataFrame()
+
+
+def _participant_rows(
+    table: pd.DataFrame,
+    participant_id: int,
+) -> pd.DataFrame:
+    if (
+        table.empty
+        or "participant_id"
+        not in table.columns
+    ):
+        return table.iloc[
+            0:0
+        ].copy()
+
+    ids = pd.to_numeric(
+        table[
+            "participant_id"
+        ],
+        errors="coerce",
+    )
+
+    return (
+        table.loc[
+            ids
+            == participant_id
+        ]
+        .copy()
+    )
+
+
+
+def _show_participant_inspector(
+    result,
+) -> None:
+    st.subheader(
+        "Participant"
+    )
+
+    participant_ids = (
+        _selected_participant_ids(
+            result
+        )
+    )
+
+    if not participant_ids:
+        st.info(
+            "No included participants were found "
+            "for this audit."
+        )
+        return
+
+    participant_id = st.selectbox(
+        "Participant",
+        options=participant_ids,
+        key=PARTICIPANT_VIEW_KEY,
+        format_func=lambda pid: f"PID {pid}",
+    )
+
+    state = _participant_rows(
+        _read_result_table(
+            result,
+            "participant_state_daily.csv",
+        ),
+        participant_id,
+    )
+
+    quality = _participant_rows(
+        _read_result_table(
+            result,
+            "data_quality.csv",
+        ),
+        participant_id,
+    )
+
+    patterns = _participant_rows(
+        _read_result_table(
+            result,
+            "candidate_patterns.csv",
+        ),
+        participant_id,
+    )
+
+    # -------------------------------------------------
+    # Current trajectory state
+    # -------------------------------------------------
+
+    current_state = "Unknown"
+    last_engagement = "—"
+    days_since = "—"
+
+    if not state.empty:
+        state[
+            "date"
+        ] = pd.to_datetime(
+            state[
+                "date"
+            ],
+            errors="coerce",
+        )
+
+        state = (
+            state.sort_values(
+                "date"
+            )
+        )
+
+        current = (
+            state.iloc[-1]
+        )
+
+        current_state = (
+            str(
+                current.get(
+                    "engagement_state",
+                    "Unknown",
+                )
+            )
+        )
+
+        raw_last_engagement = (
+            current.get(
+                "last_explicit_engagement_date"
+            )
+        )
+
+        if pd.notna(
+            raw_last_engagement
+        ):
+            last_engagement = str(
+                raw_last_engagement
+            )
+
+        raw_days_since = (
+            current.get(
+                "days_since_last_explicit_engagement"
+            )
+        )
+
+        if pd.notna(
+            raw_days_since
+        ):
+            try:
+                days_since = str(
+                    int(
+                        float(
+                            raw_days_since
+                        )
+                    )
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+                days_since = str(
+                    raw_days_since
+                )
+
+    # -------------------------------------------------
+    # Data quality
+    # -------------------------------------------------
+
+    quality_state = "Unknown"
+
+    if not quality.empty:
+        raw_quality = (
+            quality.iloc[0].get(
+                "core_quality_state"
+            )
+        )
+
+        if pd.notna(
+            raw_quality
+        ):
+            quality_state = str(
+                raw_quality
+            )
+
+    # -------------------------------------------------
+    # Summary metrics
+    # -------------------------------------------------
+
+    col1, col2, col3, col4 = (
+        st.columns(
+            4
+        )
+    )
+
+    with col1:
+        st.metric(
+            "Current state",
+            current_state,
+        )
+
+    with col2:
+        st.metric(
+            "Last explicit engagement",
+            last_engagement,
+        )
+
+    with col3:
+        st.metric(
+            "Days since engagement",
+            days_since,
+        )
+
+    with col4:
+        st.metric(
+            "Candidate patterns",
+            len(
+                patterns
+            ),
+        )
+
+    st.caption(
+        f"Data quality: {quality_state}"
+    )
+
+
+
+def _show_run_summary(
+    result,
+) -> None:
+    st.success(
+        "Trajectory audit completed."
+    )
+
+    view = st.selectbox(
+        "Results view",
+        [
+            "Campaign overview",
+            "Participant",
+        ],
+        key=RESULT_VIEW_KEY,
+    )
+
+    st.divider()
+
+    if view == "Campaign overview":
+        _show_campaign_overview(
+            result
+        )
+
+    else:
+        _show_participant_inspector(
+            result
+        )
+
 
 
 def _trajectory_progress_value(
@@ -1087,14 +1832,24 @@ def render_trajectory_audit_page() -> None:
         SOURCE_STATE_KEY
     )
 
+    last_run = st.session_state.get(
+        LAST_RUN_STATE_KEY
+    )
+
     if not isinstance(
-        source,
-        TrajectoryAuditSource,
+            source,
+            TrajectoryAuditSource,
     ):
-        st.info(
-            "Choose a campaign source in the "
-            "sidebar to continue."
-        )
+        if last_run is not None:
+            _show_run_summary(
+                last_run
+            )
+
+        else:
+            st.info(
+                "Choose a campaign source in the "
+                "sidebar to continue."
+            )
 
         return
 

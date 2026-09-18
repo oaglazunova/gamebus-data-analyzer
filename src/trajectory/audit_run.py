@@ -398,9 +398,16 @@ def run_trajectory_audit_snapshot(
         )
     )
 
+    if not campaign_id:
+        raise TrajectoryAuditRunError(
+            "The trajectory audit requires a valid "
+            "GameBus campaign ID in the campaign "
+            "description."
+        )
+
     when = (
-        created_at
-        or datetime.now().astimezone()
+            created_at
+            or datetime.now().astimezone()
     )
 
     output_root_path = Path(
@@ -412,14 +419,30 @@ def run_trajectory_audit_snapshot(
         exist_ok=True,
     )
 
-    run_name = (
-        f"{_safe_component(abbreviation, 'campaign')}_"
-        f"{_safe_component(campaign_id, 'unknown')}_"
-        f"{_timestamp_text(when)}"
+    campaign_dir = (
+            output_root_path
+            / (
+                "campaign_"
+                f"{_safe_component(campaign_id, 'unknown')}"
+            )
+    )
+
+    audits_dir = (
+            campaign_dir
+            / "audits"
+    )
+
+    audits_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    run_name = _timestamp_text(
+        when
     )
 
     run_dir = _unique_run_directory(
-        output_root_path,
+        audits_dir,
         run_name,
     )
 

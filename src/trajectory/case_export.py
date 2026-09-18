@@ -1103,6 +1103,328 @@ def _plot_participant_trajectory(
     )
 
 
+def _build_cohort_domain_tool_table(
+    domain_tool: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Build daily cohort-level domain/tool activity.
+
+    Domain rows contain explicit intervention
+    engagement only.
+
+    Tool rows contain all observed activity-provider
+    evidence, including passive Garmin observations.
+    """
+
+    columns = [
+        "date",
+        "dimension",
+        "name",
+        "event_count",
+    ]
+
+    if domain_tool.empty:
+        return pd.DataFrame(
+            columns=columns
+        )
+
+    data = domain_tool.copy()
+
+    data["date"] = pd.to_datetime(
+        data[
+            "date"
+        ],
+        errors="coerce",
+    )
+
+    data = data.dropna(
+        subset=[
+            "date"
+        ]
+    )
+
+    if data.empty:
+        return pd.DataFrame(
+            columns=columns
+        )
+
+    # -------------------------------------------------
+    # Domains:
+    # explicit intervention engagement only.
+    #
+    # event_weight prevents multi-domain events from
+    # being counted more than once in total.
+    # -------------------------------------------------
+
+    domain_data = data.loc[
+        (
+            data[
+                "event_channel"
+            ]
+            == "explicit_engagement"
+        )
+        &
+        (
+            data[
+                "domain"
+            ]
+            != "unmapped"
+        )
+    ].copy()
+
+    domain_rows = pd.DataFrame(
+        columns=columns
+    )
+
+    if not domain_data.empty:
+        domain_rows = (
+            domain_data.groupby(
+                [
+                    "date",
+                    "domain",
+                ],
+                as_index=False,
+            )[
+                "event_weight"
+            ]
+            .sum()
+            .rename(
+                columns={
+                    "domain": "name",
+                    "event_weight": "event_count",
+                }
+            )
+        )
+
+        domain_rows[
+            "dimension"
+        ] = "domain"
+
+    # -------------------------------------------------
+    # Tools:
+    # all observed activity-provider evidence.
+    #
+    # Deduplicate event/tool combinations first.
+    # -------------------------------------------------
+
+    tool_data = (
+        data[
+            [
+                "event_id",
+                "date",
+                "tool",
+            ]
+        ]
+        .drop_duplicates(
+            [
+                "event_id",
+                "tool",
+            ]
+        )
+    )
+
+    tool_rows = pd.DataFrame(
+        columns=columns
+    )
+
+    if not tool_data.empty:
+        tool_rows = (
+            tool_data.groupby(
+                [
+                    "date",
+                    "tool",
+                ],
+                as_index=False,
+            )
+            .size()
+            .rename(
+                columns={
+                    "tool": "name",
+                    "size": "event_count",
+                }
+            )
+        )
+
+        tool_rows[
+            "dimension"
+        ] = "tool"
+
+    result = pd.concat(
+        [
+            domain_rows,
+            tool_rows,
+        ],
+        ignore_index=True,
+    )
+
+    if result.empty:
+        return pd.DataFrame(
+            columns=columns
+        )
+
+    return (
+        result[
+            columns
+        ]
+        .sort_values(
+            [
+                "dimension",
+                "name",
+                "date",
+            ]
+        )
+        .reset_index(
+            drop=True
+        )
+    )
+
+
+def _plot_cohort_domain_tool(
+    cohort_domain_tool: pd.DataFrame,
+    output_path: str,
+) -> None:
+    """
+    Plot trailing 7-day cohort activity by
+    behavioral domain and tool.
+    """
+
+    if cohort_domain_tool.empty:
+        return
+
+    data = cohort_domain_tool.copy()
+
+    data["date"] = pd.to_datetime(
+        data[
+            "date"
+        ],
+        errors="coerce",
+    )
+
+    data[
+        "event_count"
+    ] = pd.to_numeric(
+        data[
+            "event_count"
+        ],
+        errors="coerce",
+    ).fillna(0)
+
+    data = data.dropna(
+        subset=[
+            "date"
+        ]
+    )
+
+    if data.empty:
+        return
+
+    start = data[
+        "date"
+    ].min()
+
+    end = data[
+        "date"
+    ].max()
+
+    full_dates = pd.date_range(
+        start=start,
+        end=end,
+        freq="D",
+    )
+
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=(
+            14,
+            8,
+        ),
+        sharex=True,
+    )
+
+    for axis, dimension, title in [
+        (
+            axes[0],
+            "domain",
+            "Explicit engagement by behavioral domain",
+        ),
+        (
+            axes[1],
+            "tool",
+            "Activity evidence by tool",
+        ),
+    ]:
+        subset = data.loc[
+            data[
+                "dimension"
+            ]
+            == dimension
+        ]
+
+        if subset.empty:
+            axis.set_title(
+                title
+            )
+            continue
+
+        daily = (
+            subset.pivot_table(
+                index="date",
+                columns="name",
+                values="event_count",
+                aggfunc="sum",
+                fill_value=0,
+            )
+            .reindex(
+                full_dates,
+                fill_value=0,
+            )
+        )
+
+        rolling = daily.rolling(
+            window=7,
+            min_periods=1,
+        ).sum()
+
+        for name in rolling.columns:
+            axis.plot(
+                rolling.index,
+                rolling[
+                    name
+                ],
+                label=str(
+                    name
+                ),
+            )
+
+        axis.set_title(
+            title
+        )
+
+        axis.set_ylabel(
+            "Events\n(trailing 7 days)"
+        )
+
+        axis.legend()
+
+    axes[1].set_xlabel(
+        "Date"
+    )
+
+    fig.tight_layout()
+
+    fig.savefig(
+        output_path,
+        dpi=150,
+        bbox_inches="tight",
+    )
+
+    plt.close(
+        fig
+    )
+
+
+
 def _plot_domain_tool_trajectory(
     participant_id: int,
     participant_domain_tool: pd.DataFrame,
@@ -1436,17 +1758,17 @@ def _plot_domain_tool_trajectory(
     )
 
 
-def _plot_cohort_engagement(
+
+def _build_cohort_engagement_table(
     state: pd.DataFrame,
-    output_path: str,
-) -> None:
+) -> pd.DataFrame:
     """
-    Plot the number of participants in each
-    engagement state over time.
+    Count participants in each engagement state
+    for every observed date.
     """
 
     if state.empty:
-        return
+        return pd.DataFrame()
 
     data = state.copy()
 
@@ -1464,7 +1786,7 @@ def _plot_cohort_engagement(
     )
 
     if data.empty:
-        return
+        return pd.DataFrame()
 
     cohort = (
         data.groupby(
@@ -1477,7 +1799,24 @@ def _plot_cohort_engagement(
         .unstack(
             fill_value=0
         )
+        .sort_index()
     )
+
+    return cohort
+
+
+
+def _plot_cohort_engagement(
+    cohort: pd.DataFrame,
+    output_path: str,
+) -> None:
+    """
+    Plot the number of participants in each
+    engagement state over time.
+    """
+
+    if cohort.empty:
+        return
 
     state_order = [
         "no_explicit_engagement_observed_yet",
@@ -1648,6 +1987,24 @@ def run_case_export(
     # Cohort-level plot.
     # -------------------------------------------------
 
+    cohort_engagement = (
+        _build_cohort_engagement_table(
+            state
+        )
+    )
+
+    cohort_table_path = (
+        os.path.join(
+            config.output_dir,
+            "cohort_engagement_over_time.csv",
+        )
+    )
+
+    cohort_engagement.reset_index().to_csv(
+        cohort_table_path,
+        index=False,
+    )
+
     cohort_plot_path = (
         os.path.join(
             plots_dir,
@@ -1656,8 +2013,38 @@ def run_case_export(
     )
 
     _plot_cohort_engagement(
-        state,
+        cohort_engagement,
         cohort_plot_path,
+    )
+
+    cohort_domain_tool = (
+        _build_cohort_domain_tool_table(
+            domain_tool
+        )
+    )
+
+    cohort_domain_tool_path = (
+        os.path.join(
+            config.output_dir,
+            "cohort_domain_tool_engagement.csv",
+        )
+    )
+
+    cohort_domain_tool.to_csv(
+        cohort_domain_tool_path,
+        index=False,
+    )
+
+    cohort_domain_tool_plot_path = (
+        os.path.join(
+            plots_dir,
+            "cohort_domain_tool_engagement.png",
+        )
+    )
+
+    _plot_cohort_domain_tool(
+        cohort_domain_tool,
+        cohort_domain_tool_plot_path,
     )
 
     # -------------------------------------------------

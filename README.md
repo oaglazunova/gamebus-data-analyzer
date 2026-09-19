@@ -7,7 +7,10 @@ The current version provides a Streamlit interface with two independent workflow
 - **Get data** — download campaign data from GameBus Studio and, optionally, participant data from the GameBus database.
 - **Analyze existing data** — select a previously created dataset, review the analysis cohort, and generate analysis outputs.
 
-The earlier command-line version of the analyzer is preserved as **GameBus Data Analyzer v1.2**.
+The earlier command-line version of the analyzer is preserved as **GameBus Data Analyzer v1.2.0**.
+
+![img_2.png](img_2.png)
+![img_3.png](img_3.png)
 
 ---
 
@@ -18,9 +21,11 @@ The application is officially supported on Windows.
 Recommended:
 
 - Python 3.11
-- Git
+- Git (Optional, for cloning the repository)
 - access to GameBus Studio
-- a GameBus API key if participant data need to be downloaded
+- a GameBus API key if participant data need to be downloaded 
+
+To receive a GameBus API key, contact the GameBus team.
 
 ---
 
@@ -32,11 +37,31 @@ Clone the repository:
 git clone https://github.com/oaglazunova/gamebus-data-analyzer.git
 cd gamebus-data-analyzer
 ```
+Alternatively, you can download the repository as a ZIP file and extract it.
 
-Create and activate a virtual environment:
+### Recommended Windows installation
+
+Open the `scripts` folder and double-click:
+
+```text
+install_windows.bat
+```
+
+The installer:
+
+- checks that Python 3.11 is available;
+- creates a local `.venv` virtual environment;
+- installs the dependencies from `requirements.txt`;
+- checks that the installed dependencies are consistent.
+
+If `.venv` already exists, the installer recreates it.
+
+### Manual installation
+
+Alternatively, create and activate the virtual environment manually:
 
 ```powershell
-python -m venv .venv
+py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
@@ -57,10 +82,24 @@ python -m pip install -r requirements.txt
 
 ## Starting the application
 
-Run:
+### Recommended Windows start
+
+Open the `scripts` folder and double-click:
+
+```text
+run_app.bat
+```
+
+The application should open in your browser.
+
+Keep the terminal window open while the application is running. Close the window or press `Ctrl+C` to stop it.
+
+### Manual start
+
+From the repository root, run:
 
 ```powershell
-streamlit run streamlit_app.py
+python -m streamlit run streamlit_app.py
 ```
 
 The application opens in the browser.
@@ -244,9 +283,9 @@ The application displays:
 
 ## Analysis cohort
 
-If the dataset already contains `cohort_manifest.json`, the saved cohort is used.
+This is done to exclude test accounts or other participants that the researcher does not want to include in the analysis.
 
-The cohort can be reviewed or changed before another analysis run.
+If the dataset already contains `cohort_manifest.json`, the saved cohort is used. The cohort can be reviewed or changed before another analysis run.
 
 Changing the analysis cohort does not:
 
@@ -344,9 +383,9 @@ Do not commit `.env`, credentials files, session cookies, or participant data to
 
 ---
 
-# Earlier command-line workflow — v1.2
+# Earlier command-line workflow — v1.2.0
 
-GameBus Data Analyzer v1.2 used the original command-line workflow based on files such as:
+GameBus Data Analyzer v1.2.0 used the original command-line workflow based on files such as:
 
 ```text
 config/users.xlsx
@@ -365,11 +404,11 @@ python pipeline.py --analyze
 That version is preserved in:
 
 ```text
-tag:    v1.2
-branch: release/1.2
+tag:    v1.2.0
+branch: release/v1.2.0
 ```
 
-Use v1.2 for datasets prepared specifically for that earlier folder structure.
+Use v1.2.0 for datasets prepared specifically for that earlier folder structure.
 
 The current Streamlit application uses the dataset-folder workflow described above.
 
@@ -389,6 +428,9 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 ```text
 gamebus-data-analyzer/
+├── scripts/
+│   ├── install_windows.bat
+│   └── run_app.bat
 ├── src/
 │   ├── acquisition/       # Campaign and participant-data acquisition
 │   ├── analysis/          # Analysis and reporting
@@ -399,7 +441,7 @@ gamebus-data-analyzer/
 ├── tests/
 ├── datasets/              # Default location for datasets
 ├── streamlit_app.py       # Streamlit entry point
-├── pipeline.py            # Earlier/command-line entry point
+├── pipeline.py            # Earlier command-line entry point
 ├── requirements.txt
 └── README.md
 ```

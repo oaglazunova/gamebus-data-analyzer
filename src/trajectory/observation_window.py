@@ -352,7 +352,10 @@ def build_observation_window(
             errors="raise",
         ).floor("D")
 
-        cutoff_source = "manual_override"
+        cutoff_source = (
+                config.analysis_cutoff_source
+                or "manual_override"
+        )
 
     else:
 

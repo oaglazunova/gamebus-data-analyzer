@@ -20,7 +20,7 @@ The application is officially supported on Windows.
 
 Recommended:
 
-- Python 3.11
+- Python 3.14
 - Git (Optional, for cloning the repository)
 - access to GameBus Studio
 - a GameBus API key if participant data need to be downloaded 
@@ -49,7 +49,7 @@ install_windows.bat
 
 The installer:
 
-- checks that Python 3.11 is available;
+- checks that Python 3.14 is available;
 - creates a local `.venv` virtual environment;
 - installs the dependencies from `requirements.txt`;
 - checks that the installed dependencies are consistent.
@@ -61,7 +61,7 @@ If `.venv` already exists, the installer recreates it.
 Alternatively, create and activate the virtual environment manually:
 
 ```powershell
-py -3.11 -m venv .venv
+py -3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 

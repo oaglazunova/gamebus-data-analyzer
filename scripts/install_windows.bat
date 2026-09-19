@@ -10,14 +10,14 @@ echo.
 REM Move to repository root.
 cd /d "%~dp0\.."
 
-echo [1/6] Checking Python 3.11+...
-py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>nul
+echo [1/6] Checking Python 3.14+...
+py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 14) else 1)" >nul 2>nul
 
 if errorlevel 1 (
     echo.
-    echo ERROR: Python 3.11 or newer is not installed or not available.
+    echo ERROR: Python 3.14 or newer is not installed or not available.
     echo.
-    echo Please install Python 3.11 or newer and make sure
+    echo Please install Python 3.14 or newer and make sure
     echo it is available through the Windows Python launcher.
     echo.
     pause

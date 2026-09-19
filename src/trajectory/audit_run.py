@@ -308,11 +308,22 @@ def run_trajectory_audit_snapshot(
     candidate_participant_ids: Iterable[Any],
     selected_participant_ids: Iterable[Any],
     source_type: str,
+    analysis_cutoff: str | None = None,
+    analysis_cutoff_source: str | None = None,
     output_root: str | Path = (
         DEFAULT_TRAJECTORY_AUDITS_DIR
     ),
     created_at: datetime | None = None,
-    progress_callback: (Callable[[str, str,], None,] | None) = None,
+    progress_callback: (
+        Callable[
+            [
+                str,
+                str,
+            ],
+            None,
+        ]
+        | None
+    ) = None,
 ) -> TrajectoryAuditRunResult:
     """
     Create one immutable, timestamped trajectory-audit run.
@@ -534,6 +545,12 @@ def run_trajectory_audit_snapshot(
             "abbreviation": abbreviation,
             "id": campaign_id,
         },
+        "observation": {
+            "analysis_cutoff": analysis_cutoff,
+            "cutoff_source": (
+                analysis_cutoff_source
+            ),
+        },
         "inputs": {
             "campaign_data": str(
                 Path("inputs")
@@ -568,6 +585,10 @@ def run_trajectory_audit_snapshot(
         ),
         output_dir=str(
             results_dir
+        ),
+        analysis_cutoff=analysis_cutoff,
+        analysis_cutoff_source=(
+            analysis_cutoff_source
         ),
         analysis_participant_ids=(
             set(

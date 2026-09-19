@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 import zipfile
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -268,6 +269,10 @@ class TestTrajectoryAuditSource(
             },
         ]
 
+        before_snapshot = datetime.now(
+            timezone.utc
+        )
+
         source = (
             prepare_gamebus_trajectory_source(
                 campaign_abbreviation=(
@@ -283,6 +288,10 @@ class TestTrajectoryAuditSource(
                     "cookies.json"
                 ),
             )
+        )
+
+        after_snapshot = datetime.now(
+            timezone.utc
         )
 
         try:
@@ -325,6 +334,20 @@ class TestTrajectoryAuditSource(
             mock_data.assert_called_once()
 
             mock_users.assert_called_once()
+
+            self.assertIsNotNone(
+                source.snapshot_time
+            )
+
+            self.assertGreaterEqual(
+                source.snapshot_time,
+                before_snapshot,
+            )
+
+            self.assertLessEqual(
+                source.snapshot_time,
+                after_snapshot,
+            )
 
         finally:
             remove_trajectory_source(

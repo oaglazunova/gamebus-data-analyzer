@@ -47,13 +47,24 @@ class TrajectoryAuditConfig:
 
     observation_start_grace_days: int = 14
 
-    # Optional manual override.
-    # Example:
-    # analysis_cutoff = "2026-09-11"
+    # Explicit end of the observation period used
+    # for longitudinal analysis.
     #
-    # None means:
-    # use the latest trustworthy observed event date.
+    # Examples:
+    #   live GameBus snapshot time
+    #   researcher-confirmed historical cutoff
+    #
+    # If None, older/direct workflows still fall
+    # back to the latest observed event.
     analysis_cutoff: str | None = None
+
+    # Provenance of analysis_cutoff.
+    #
+    # Examples:
+    #   live_snapshot_time
+    #   user_confirmed_configured_end
+    #   user_provided_historical_cutoff
+    analysis_cutoff_source: str | None = None
 
     # Candidate-pattern windows.
     #

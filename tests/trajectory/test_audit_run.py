@@ -525,6 +525,99 @@ class TestTrajectoryAuditRun(
                     ),
                 )
 
+    @patch(
+        "src.trajectory.audit_run."
+        "run_trajectory_audit",
+        return_value={},
+    )
+    def test_run_preserves_analysis_cutoff_metadata(
+        self,
+        mocked_audit,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(
+                tmp
+            )
+
+            campaign_zip = (
+                root
+                / "campaign-283-export.zip"
+            )
+
+            campaign_xlsx = (
+                root
+                / "campaign-283.xlsx"
+            )
+
+            _write_campaign_zip(
+                campaign_zip
+            )
+
+            _write_campaign_xlsx(
+                campaign_xlsx
+            )
+
+            result = run_trajectory_audit_snapshot(
+                campaign_data_path=(
+                    campaign_zip
+                ),
+                campaign_description_path=(
+                    campaign_xlsx
+                ),
+                candidate_participant_ids=[
+                    497,
+                    498,
+                ],
+                selected_participant_ids=[
+                    497,
+                ],
+                source_type="gamebus",
+                analysis_cutoff=(
+                    "2026-09-19T12:30:00+00:00"
+                ),
+                analysis_cutoff_source=(
+                    "live_snapshot_time"
+                ),
+                output_root=(
+                    root
+                    / "audits"
+                ),
+            )
+
+            config = (
+                mocked_audit.call_args.args[
+                    0
+                ]
+            )
+
+            self.assertEqual(
+                config.analysis_cutoff,
+                "2026-09-19T12:30:00+00:00",
+            )
+
+            self.assertEqual(
+                config.analysis_cutoff_source,
+                "live_snapshot_time",
+            )
+
+            manifest = json.loads(
+                result.run_manifest_path.read_text(
+                    encoding="utf-8"
+                )
+            )
+
+            self.assertEqual(
+                manifest["observation"],
+                {
+                    "analysis_cutoff": (
+                        "2026-09-19T12:30:00+00:00"
+                    ),
+                    "cutoff_source": (
+                        "live_snapshot_time"
+                    ),
+                },
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import shutil
 import tempfile
+
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+from datetime import datetime, timezone
 
 from src.acquisition.campaign_users import (
     list_campaign_users,
@@ -58,6 +60,7 @@ class TrajectoryAuditSource:
     ]
 
     accounts_without_pid: int = 0
+    snapshot_time: datetime | None = None
 
 
 def _normalize_pid(
@@ -285,6 +288,10 @@ def prepare_gamebus_trajectory_source(
             "Campaign abbreviation is required."
         )
 
+    snapshot_time = datetime.now(
+        timezone.utc
+    )
+
     staging_dir = (
         _create_staging_directory()
     )
@@ -453,6 +460,9 @@ def prepare_gamebus_trajectory_source(
             ),
             accounts_without_pid=(
                 accounts_without_pid
+            ),
+            snapshot_time=(
+                snapshot_time
             ),
         )
 

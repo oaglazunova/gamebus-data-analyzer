@@ -18,7 +18,6 @@ from src.acquisition.organizer_storage import (
 )
 from src.trajectory.audit_run import (
     DEFAULT_TRAJECTORY_AUDITS_DIR,
-    TrajectoryAuditRunError,
     run_trajectory_audit_snapshot,
 )
 from src.trajectory.audit_source import (
@@ -161,6 +160,18 @@ def _remove_loaded_source() -> None:
         COHORT_EDITOR_KEY,
         None,
     )
+
+
+def _clear_result_state() -> None:
+    for key in (
+        LAST_RUN_STATE_KEY,
+        RESULT_VIEW_KEY,
+        PARTICIPANT_VIEW_KEY,
+    ):
+        st.session_state.pop(
+            key,
+            None,
+        )
 
 
 def _source_mode_changed() -> None:
@@ -313,65 +324,6 @@ def _initialize_state() -> dict:
 
 
 
-def _load_gamebus_source(
-    *,
-    campaign_abbreviation: str,
-    email: str,
-    password: str,
-    remember_credentials: bool,
-) -> None:
-    _remove_loaded_source()
-
-    try:
-        source = (
-            prepare_gamebus_trajectory_source(
-                campaign_abbreviation=(
-                    campaign_abbreviation
-                ),
-                organizer_email=(
-                    email
-                ),
-                organizer_password=(
-                    password
-                ),
-                cookie_file=(
-                    get_cookie_file()
-                ),
-            )
-        )
-
-    except TrajectorySourceError as exc:
-        st.error(
-            str(
-                exc
-            )
-        )
-
-        return
-
-    try:
-        _remember_gamebus_settings(
-            email=email,
-            password=password,
-            remember_credentials=(
-                remember_credentials
-            ),
-            campaign_abbreviation=(
-                campaign_abbreviation
-            ),
-        )
-
-    except Exception as exc:
-        st.warning(
-            "Campaign loaded, but local organizer "
-            "settings could not be updated: "
-            f"{exc}"
-        )
-
-    st.session_state[
-        SOURCE_STATE_KEY
-    ] = source
-
 
 def _campaign_selector(
     settings: dict,
@@ -473,6 +425,8 @@ def _load_uploaded_source() -> None:
 
         return
 
+    _clear_result_state()
+
     st.session_state[
         SOURCE_STATE_KEY
     ] = source
@@ -532,6 +486,8 @@ def _load_gamebus_source(
             "settings could not be updated: "
             f"{exc}"
         )
+
+    _clear_result_state()
 
     st.session_state[
         SOURCE_STATE_KEY
@@ -967,6 +923,8 @@ def _build_participant_status_table(
         "Last explicit engagement",
         "Days since engagement",
         "Candidate patterns",
+        "Latest detected",
+        "Ongoing at audit cutoff",
         "Data quality",
     ]
 
@@ -993,19 +951,25 @@ def _build_participant_status_table(
     rows = []
 
     for participant_id in participant_ids:
-        participant_state = _participant_rows(
-            state,
-            participant_id,
+        participant_state = (
+            _participant_rows(
+                state,
+                participant_id,
+            )
         )
 
-        participant_quality = _participant_rows(
-            quality,
-            participant_id,
+        participant_quality = (
+            _participant_rows(
+                quality,
+                participant_id,
+            )
         )
 
-        participant_patterns = _participant_rows(
-            patterns,
-            participant_id,
+        participant_patterns = (
+            _participant_rows(
+                patterns,
+                participant_id,
+            )
         )
 
         current_state = "Unknown"
@@ -1045,6 +1009,9 @@ def _build_participant_status_table(
             ):
                 current_state = str(
                     raw_state
+                ).replace(
+                    "_",
+                    " ",
                 )
 
             raw_last = current.get(
@@ -1063,9 +1030,9 @@ def _build_participant_status_table(
                     parsed_last
                 ):
                     last_engagement = (
-                        parsed_last
-                        .date()
-                        .isoformat()
+                        _format_date(
+                            parsed_last
+                        )
                     )
 
                 else:
@@ -1109,22 +1076,116 @@ def _build_participant_status_table(
             if pd.notna(
                 raw_quality
             ):
-                quality_state = str(
-                    raw_quality
+                quality_state = (
+                    str(
+                        raw_quality
+                    )
+                    .replace(
+                        "_",
+                        " ",
+                    )
                 )
+
+        pattern_text = "—"
+        latest_detected = "—"
+        ongoing_at_cutoff = "No"
+
+        if not participant_patterns.empty:
+            pattern_names = []
+
+            if (
+                "pattern_type"
+                in participant_patterns.columns
+            ):
+                for value in (
+                    participant_patterns[
+                        "pattern_type"
+                    ]
+                    .dropna()
+                    .astype(str)
+                    .tolist()
+                ):
+                    friendly = (
+                        value.replace(
+                            "_",
+                            " ",
+                        )
+                    )
+
+                    if friendly not in pattern_names:
+                        pattern_names.append(
+                            friendly
+                        )
+
+            if pattern_names:
+                pattern_text = (
+                    f"{len(participant_patterns)} — "
+                    + "; ".join(
+                        pattern_names
+                    )
+                )
+
+            if (
+                "detected_at"
+                in participant_patterns.columns
+            ):
+                detected = pd.to_datetime(
+                    participant_patterns[
+                        "detected_at"
+                    ],
+                    errors="coerce",
+                ).dropna()
+
+                if not detected.empty:
+                    latest_detected = (
+                        _format_date(
+                            detected.max()
+                        )
+                    )
+
+            if (
+                "right_censored"
+                in participant_patterns.columns
+            ):
+                right_censored = (
+                    participant_patterns[
+                        "right_censored"
+                    ]
+                    .astype(str)
+                    .str.strip()
+                    .str.lower()
+                    .isin(
+                        [
+                            "true",
+                            "1",
+                            "yes",
+                        ]
+                    )
+                )
+
+                if right_censored.any():
+                    ongoing_at_cutoff = "Yes"
 
         rows.append(
             {
                 "PID": participant_id,
-                "Current state": current_state,
+                "Current state": (
+                    current_state
+                ),
                 "Last explicit engagement": (
                     last_engagement
                 ),
                 "Days since engagement": (
                     days_since
                 ),
-                "Candidate patterns": len(
-                    participant_patterns
+                "Candidate patterns": (
+                    pattern_text
+                ),
+                "Latest detected": (
+                    latest_detected
+                ),
+                "Ongoing at audit cutoff": (
+                    ongoing_at_cutoff
                 ),
                 "Data quality": (
                     quality_state
@@ -1302,85 +1363,20 @@ def _show_campaign_overview(
             use_container_width=True,
         )
 
+        st.caption(
+            "The first two panels show explicit "
+            "intervention engagement. The final panel "
+            "shows other observed activity, such as "
+            "navigation or passive sensor evidence; it "
+            "does not count as explicit engagement."
+        )
+
     else:
         st.info(
             "No cohort domain/tool plot was produced "
             "for this audit."
         )
 
-    # -------------------------------------------------
-    # Candidate trajectory patterns
-    # -------------------------------------------------
-
-    st.subheader(
-        "Candidate trajectory patterns"
-    )
-
-    candidate_patterns_path = (
-        result.results_dir
-        / "candidate_patterns.csv"
-    )
-
-    if candidate_patterns_path.is_file():
-        candidate_patterns = pd.read_csv(
-            candidate_patterns_path
-        )
-
-        if candidate_patterns.empty:
-            st.info(
-                "No candidate trajectory patterns "
-                "were detected."
-            )
-
-        else:
-            display_columns = [
-                column
-                for column in [
-                    "participant_id",
-                    "pattern_type",
-                    "subject",
-                    "detected_at",
-                    "status",
-                    "right_censored",
-                    "core_quality_state",
-                ]
-                if column
-                in candidate_patterns.columns
-            ]
-
-            display_table = (
-                candidate_patterns[
-                    display_columns
-                ]
-                .copy()
-            )
-
-            rename_columns = {
-                "participant_id": "PID",
-                "pattern_type": "Pattern",
-                "subject": "Subject",
-                "detected_at": "Detected at",
-                "status": "Status",
-                "right_censored": "Right-censored",
-                "core_quality_state": "Data quality",
-            }
-
-            display_table = (
-                display_table.rename(
-                    columns=rename_columns
-                )
-            )
-
-            st.dataframe(
-                display_table,
-                hide_index=True,
-                use_container_width=True,
-            )
-
-    else:
-        st.info(
-            "Candidate-pattern output was not found."
-        )
 
     # -------------------------------------------------
     # Saved audit
@@ -1512,6 +1508,263 @@ def _participant_rows(
     )
 
 
+def _friendly_label(
+    value,
+) -> str:
+    if pd.isna(
+        value
+    ):
+        return "—"
+
+    return (
+        str(
+            value
+        )
+        .replace(
+            "_",
+            " ",
+        )
+    )
+
+
+def _format_date(
+    value,
+) -> str:
+    if pd.isna(
+        value
+    ):
+        return "—"
+
+    parsed = pd.to_datetime(
+        value,
+        errors="coerce",
+    )
+
+    if pd.isna(
+        parsed
+    ):
+        return str(
+            value
+        )
+
+    return parsed.strftime(
+        "%d-%m-%Y"
+    )
+
+
+def _yes_no(
+    value,
+) -> str:
+    if pd.isna(
+        value
+    ):
+        return "No"
+
+    if isinstance(
+        value,
+        bool,
+    ):
+        return (
+            "Yes"
+            if value
+            else "No"
+        )
+
+    return (
+        "Yes"
+        if str(
+            value
+        ).strip().lower()
+        in {
+            "true",
+            "1",
+            "yes",
+        }
+        else "No"
+    )
+
+
+
+def _format_flags(
+    value,
+) -> str:
+    if pd.isna(
+        value
+    ):
+        return "None"
+
+    if isinstance(
+        value,
+        list,
+    ):
+        flags = value
+
+    else:
+        text = str(
+            value
+        ).strip()
+
+        if (
+            not text
+            or text == "[]"
+        ):
+            return "None"
+
+        try:
+            parsed = json.loads(
+                text
+            )
+
+            flags = (
+                parsed
+                if isinstance(
+                    parsed,
+                    list,
+                )
+                else [
+                    parsed
+                ]
+            )
+
+        except (
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ):
+            flags = [
+                text
+            ]
+
+    if not flags:
+        return "None"
+
+    return "; ".join(
+        _friendly_label(
+            flag
+        )
+        for flag in flags
+    )
+
+
+
+def _format_pattern_evidence(
+    value,
+) -> str:
+    if pd.isna(
+        value
+    ):
+        return "—"
+
+    try:
+        evidence = json.loads(
+            str(
+                value
+            )
+        )
+
+    except (
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ):
+        return str(
+            value
+        )
+
+    if not isinstance(
+        evidence,
+        dict,
+    ):
+        return str(
+            value
+        )
+
+    parts = []
+
+    label_map = {
+        "days_since_last_explicit_engagement": (
+            "days since last engagement"
+        ),
+        "last_explicit_engagement_date": (
+            "last engagement"
+        ),
+        "inactive_days": (
+            "inactive days"
+        ),
+        "previous_engagement_date": (
+            "previous engagement"
+        ),
+        "reengagement_date": (
+            "re-engagement"
+        ),
+        "reference_events": (
+            "reference events"
+        ),
+        "recent_events": (
+            "recent events"
+        ),
+        "recent_to_reference_ratio": (
+            "recent/reference ratio"
+        ),
+        "decline_ratio_threshold": (
+            "decline threshold"
+        ),
+    }
+
+    preferred_keys = [
+        "days_since_last_explicit_engagement",
+        "last_explicit_engagement_date",
+        "inactive_days",
+        "previous_engagement_date",
+        "reengagement_date",
+        "reference_events",
+        "recent_events",
+        "recent_to_reference_ratio",
+        "decline_ratio_threshold",
+    ]
+
+    for key in preferred_keys:
+        if key not in evidence:
+            continue
+
+        raw_value = evidence[
+            key
+        ]
+
+        if "date" in key:
+            display_value = (
+                _format_date(
+                    raw_value
+                )
+            )
+
+        else:
+            display_value = str(
+                raw_value
+            )
+
+        parts.append(
+            (
+                f"{label_map[key]}: "
+                f"{display_value}"
+            )
+        )
+
+    if parts:
+        return "; ".join(
+            parts
+        )
+
+    return "; ".join(
+        (
+            f"{_friendly_label(key)}: "
+            f"{value}"
+        )
+        for key, value
+        in evidence.items()
+    )
+
+
 
 def _show_participant_inspector(
     result,
@@ -1533,11 +1786,59 @@ def _show_participant_inspector(
         )
         return
 
+    email_by_pid = {}
+
+    source = st.session_state.get(
+        SOURCE_STATE_KEY
+    )
+
+    if isinstance(
+            source,
+            TrajectoryAuditSource,
+    ):
+        for participant in (
+                source.participants
+        ):
+            try:
+                pid = int(
+                    participant.pid
+                )
+
+            except (
+                    TypeError,
+                    ValueError,
+            ):
+                continue
+
+            email = (
+                    participant.email
+                    or ""
+            ).strip()
+
+            if email:
+                email_by_pid[
+                    pid
+                ] = email
+
+    def participant_label(
+            pid: int,
+    ) -> str:
+        email = email_by_pid.get(
+            pid
+        )
+
+        if email:
+            return (
+                f"{email} · PID {pid}"
+            )
+
+        return f"PID {pid}"
+
     participant_id = st.selectbox(
         "Participant",
         options=participant_ids,
         key=PARTICIPANT_VIEW_KEY,
-        format_func=lambda pid: f"PID {pid}",
+        format_func=participant_label,
     )
 
     state = _participant_rows(
@@ -1610,8 +1911,10 @@ def _show_participant_inspector(
         if pd.notna(
             raw_last_engagement
         ):
-            last_engagement = str(
-                raw_last_engagement
+            last_engagement = (
+                _format_date(
+                    raw_last_engagement
+                )
             )
 
         raw_days_since = (
@@ -1700,6 +2003,666 @@ def _show_participant_inspector(
         f"Data quality: {quality_state}"
     )
 
+    # -------------------------------------------------
+    # Trajectory
+    # -------------------------------------------------
+
+    st.subheader(
+        "Trajectory"
+    )
+
+    trajectory_plot = (
+            result.results_dir
+            / "plots"
+            / "participants"
+            / (
+                f"participant_"
+                f"{participant_id}_trajectory.png"
+            )
+    )
+
+    if trajectory_plot.is_file():
+        st.image(
+            str(
+                trajectory_plot
+            ),
+            use_container_width=True,
+        )
+
+    else:
+        st.info(
+            "No trajectory plot was produced "
+            "for this participant."
+        )
+
+    # -------------------------------------------------
+    # Behavioral domains and tools
+    # -------------------------------------------------
+
+    st.subheader(
+        "Domains and tools"
+    )
+
+    domain_tool_plot = (
+            result.results_dir
+            / "plots"
+            / "participants"
+            / (
+                f"participant_"
+                f"{participant_id}_domain_tool.png"
+            )
+    )
+
+    if domain_tool_plot.is_file():
+        st.image(
+            str(
+                domain_tool_plot
+            ),
+            use_container_width=True,
+        )
+
+        st.caption(
+            "The first two panels show explicit "
+            "intervention engagement. The final panel "
+            "shows other observed activity, such as "
+            "navigation or passive sensor evidence; it "
+            "does not count as explicit engagement."
+        )
+
+    else:
+        st.info(
+            "No domain/tool trajectory plot was "
+            "produced for this participant."
+        )
+
+    # -------------------------------------------------
+    # Candidate changes
+    # -------------------------------------------------
+
+    st.subheader(
+        "Candidate changes"
+    )
+
+    if patterns.empty:
+        st.info(
+            "No candidate trajectory changes were "
+            "detected for this participant."
+        )
+
+    else:
+        candidate_table = (
+            patterns.copy()
+        )
+
+        candidate_table[
+            "Pattern"
+        ] = candidate_table[
+            "pattern_type"
+        ].apply(
+            _friendly_label
+        )
+
+        candidate_table[
+            "Detected at"
+        ] = candidate_table[
+            "detected_at"
+        ].apply(
+            _format_date
+        )
+
+        candidate_table[
+            "Ongoing at audit cutoff"
+        ] = candidate_table[
+            "right_censored"
+        ].apply(
+            _yes_no
+        )
+
+        candidate_table[
+            "Evidence"
+        ] = candidate_table[
+            "evidence"
+        ].apply(
+            _format_pattern_evidence
+        )
+
+        display_columns = [
+            "Pattern",
+            "Detected at",
+            "Ongoing at audit cutoff",
+            "Evidence",
+        ]
+
+        if (
+                "subject"
+                in candidate_table.columns
+                and candidate_table[
+            "subject"
+        ].notna().any()
+        ):
+            candidate_table[
+                "Subject"
+            ] = candidate_table[
+                "subject"
+            ].apply(
+                _friendly_label
+            )
+
+            display_columns.insert(
+                1,
+                "Subject",
+            )
+
+        st.dataframe(
+            candidate_table[
+                display_columns
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+
+        st.caption(
+            "\"Ongoing at audit cutoff\" means that "
+            "the observed pattern had not reached an "
+            "observed ending before the available "
+            "observation period ended."
+        )
+
+    # -------------------------------------------------
+    # Participation episodes
+    # -------------------------------------------------
+
+    st.subheader(
+        "Participation episodes"
+    )
+
+    episodes = _participant_rows(
+        _read_result_table(
+            result,
+            "participation_episodes.csv",
+        ),
+        participant_id,
+    )
+
+    if episodes.empty:
+        st.info(
+            "No participation episodes were identified "
+            "for this participant."
+        )
+
+    else:
+        episodes = (
+            episodes.copy()
+        )
+
+        episodes[
+            "Episode"
+        ] = episodes[
+            "episode_number"
+        ]
+
+        episodes[
+            "Start"
+        ] = episodes[
+            "episode_start"
+        ].apply(
+            _format_date
+        )
+
+        episodes[
+            "End"
+        ] = episodes[
+            "episode_end"
+        ].apply(
+            _format_date
+        )
+
+        episodes[
+            "Duration (days)"
+        ] = episodes[
+            "duration_days"
+        ]
+
+        episodes[
+            "Active days"
+        ] = episodes[
+            "active_days"
+        ]
+
+        episodes[
+            "Explicit events"
+        ] = episodes[
+            "event_count"
+        ]
+
+        episodes[
+            "Points"
+        ] = episodes[
+            "points"
+        ]
+
+        st.dataframe(
+            episodes[
+                [
+                    "Episode",
+                    "Start",
+                    "End",
+                    "Duration (days)",
+                    "Active days",
+                    "Explicit events",
+                    "Points",
+                ]
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+
+        st.caption(
+            "A new participation episode begins after "
+            "a gap of more than 14 days between explicit "
+            "engagement dates."
+        )
+
+    # -------------------------------------------------
+    # Meaningful inactivity gaps
+    # -------------------------------------------------
+
+    st.subheader(
+        "Meaningful inactivity gaps"
+    )
+
+    gaps = _participant_rows(
+        _read_result_table(
+            result,
+            "inactivity_gaps.csv",
+        ),
+        participant_id,
+    )
+
+    if not gaps.empty:
+        gaps[
+            "inactive_days"
+        ] = pd.to_numeric(
+            gaps[
+                "inactive_days"
+            ],
+            errors="coerce",
+        )
+
+        gaps = (
+            gaps.loc[
+                gaps[
+                    "inactive_days"
+                ]
+                >= 7
+                ]
+            .copy()
+        )
+
+    if gaps.empty:
+        st.info(
+            "No inactivity gaps of 7 days or longer "
+            "were observed for this participant."
+        )
+
+    else:
+        gaps[
+            "Start"
+        ] = gaps[
+            "gap_start"
+        ].apply(
+            _format_date
+        )
+
+        gaps[
+            "End"
+        ] = gaps[
+            "gap_end"
+        ].apply(
+            _format_date
+        )
+
+        gaps[
+            "Inactive days"
+        ] = gaps[
+            "inactive_days"
+        ]
+
+        gaps[
+            "Re-engaged"
+        ] = gaps[
+            "reengaged"
+        ].apply(
+            _yes_no
+        )
+
+        gaps[
+            "Ongoing at audit cutoff"
+        ] = gaps[
+            "right_censored"
+        ].apply(
+            _yes_no
+        )
+
+        gaps[
+            "Threshold reached"
+        ] = gaps.apply(
+            lambda row: (
+                "21 days"
+                if _yes_no(
+                    row.get(
+                        "reached_21d"
+                    )
+                )
+                   == "Yes"
+                else (
+                    "14 days"
+                    if _yes_no(
+                        row.get(
+                            "reached_14d"
+                        )
+                    )
+                       == "Yes"
+                    else "7 days"
+                )
+            ),
+            axis=1,
+        )
+
+        st.dataframe(
+            gaps[
+                [
+                    "Start",
+                    "End",
+                    "Inactive days",
+                    "Threshold reached",
+                    "Re-engaged",
+                    "Ongoing at audit cutoff",
+                ]
+            ],
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    # -------------------------------------------------
+    # Observation and data quality
+    # -------------------------------------------------
+
+    st.subheader(
+        "Observation and data quality"
+    )
+
+    audit_summary = (
+        result.results.get(
+            "audit_summary",
+            {},
+        )
+    )
+
+    audit_quality = (
+        audit_summary.get(
+            "data_quality",
+            {},
+        )
+    )
+
+    observation_window = (
+        audit_quality.get(
+            "observation_window",
+            {},
+        )
+    )
+
+    if quality.empty:
+        st.info(
+            "No participant data-quality information "
+            "is available."
+        )
+
+    else:
+        quality_row = quality.iloc[0]
+
+        col1, col2, col3, col4 = (
+            st.columns(
+                4
+            )
+        )
+
+        with col1:
+            st.metric(
+                "First observed",
+                _format_date(
+                    quality_row.get(
+                        "first_observed_at"
+                    )
+                ),
+            )
+
+        with col2:
+            st.metric(
+                "Last observed",
+                _format_date(
+                    quality_row.get(
+                        "last_observed_at"
+                    )
+                ),
+            )
+
+        with col3:
+            total_events = pd.to_numeric(
+                quality_row.get(
+                    "total_events"
+                ),
+                errors="coerce",
+            )
+
+            st.metric(
+                "Observed events",
+                (
+                    int(
+                        total_events
+                    )
+                    if pd.notna(
+                        total_events
+                    )
+                    else "—"
+                ),
+            )
+
+        with col4:
+            explicit_events = pd.to_numeric(
+                quality_row.get(
+                    "explicit_engagement_events"
+                ),
+                errors="coerce",
+            )
+
+            st.metric(
+                "Explicit engagement events",
+                (
+                    int(
+                        explicit_events
+                    )
+                    if pd.notna(
+                        explicit_events
+                    )
+                    else "—"
+                ),
+            )
+
+        # ---------------------------------------------
+        # Audit observation window
+        # ---------------------------------------------
+
+        st.markdown(
+            "**Audit observation window**"
+        )
+
+        window_col1, window_col2 = (
+            st.columns(
+                2
+            )
+        )
+
+        with window_col1:
+            st.metric(
+                "Observation start",
+                _format_date(
+                    observation_window.get(
+                        "effective_start"
+                    )
+                ),
+            )
+
+        with window_col2:
+            st.metric(
+                "Audit cutoff",
+                _format_date(
+                    observation_window.get(
+                        "analysis_cutoff"
+                    )
+                ),
+            )
+
+        start_source = (
+            observation_window.get(
+                "start_source"
+            )
+        )
+
+        cutoff_source = (
+            observation_window.get(
+                "cutoff_source"
+            )
+        )
+
+        if (
+                start_source
+                or cutoff_source
+        ):
+            st.caption(
+                "Observation window: "
+                f"start = "
+                f"{_friendly_label(start_source)}; "
+                f"cutoff = "
+                f"{_friendly_label(cutoff_source)}."
+            )
+
+        # ---------------------------------------------
+        # Stream availability
+        # ---------------------------------------------
+
+        st.markdown(
+            "**Data streams**"
+        )
+
+        stream_columns = [
+            (
+                "Activity",
+                "activity_stream_state",
+            ),
+            (
+                "Navigation",
+                "navigation_stream_state",
+            ),
+            (
+                "Notifications",
+                "notification_stream_state",
+            ),
+            (
+                "Sensor",
+                "sensor_stream_state",
+            ),
+            (
+                "Garmin",
+                "garmin_stream_state",
+            ),
+            (
+                "Nutrida",
+                "nutrida_stream_state",
+            ),
+        ]
+
+        stream_rows = []
+
+        for label, column in stream_columns:
+            if column not in quality.columns:
+                continue
+
+            raw_state = quality_row.get(
+                column
+            )
+
+            stream_rows.append(
+                {
+                    "Data stream": label,
+                    "Availability": (
+                        _friendly_label(
+                            raw_state
+                        )
+                    ),
+                }
+            )
+
+        if stream_rows:
+            st.dataframe(
+                pd.DataFrame(
+                    stream_rows
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+        st.caption(
+            "\"Unavailable\" means that the audit did "
+            "not have that data stream. It must not be "
+            "interpreted as zero participant behavior. "
+            "\"Available empty\" means that the stream "
+            "was present but contained no observed events."
+        )
+
+        # ---------------------------------------------
+        # Quality / observation flags
+        # ---------------------------------------------
+
+        quality_flags = _format_flags(
+            quality_row.get(
+                "quality_flags"
+            )
+        )
+
+        observation_flags = _format_flags(
+            quality_row.get(
+                "observation_flags"
+            )
+        )
+
+        if (
+                quality_flags != "None"
+                or observation_flags != "None"
+        ):
+            st.markdown(
+                "**Cautions**"
+            )
+
+            if quality_flags != "None":
+                st.write(
+                    "Data quality: "
+                    f"{quality_flags}"
+                )
+
+            if observation_flags != "None":
+                st.write(
+                    "Observation: "
+                    f"{observation_flags}"
+                )
+
+        else:
+            st.caption(
+                "No participant-specific data-quality "
+                "or observation cautions were recorded."
+            )
+
 
 
 def _show_run_summary(
@@ -1709,24 +2672,34 @@ def _show_run_summary(
         "Trajectory audit completed."
     )
 
-    view = st.selectbox(
-        "Results view",
-        [
-            "Campaign overview",
-            "Participant",
-        ],
-        key=RESULT_VIEW_KEY,
-    )
+    if (
+        RESULT_VIEW_KEY
+        not in st.session_state
+    ):
+        st.session_state[
+            RESULT_VIEW_KEY
+        ] = "Campaign"
 
     st.divider()
 
-    if view == "Campaign overview":
-        _show_campaign_overview(
+    view = st.segmented_control(
+        "Results view",
+        options=[
+            "Campaign",
+            "Participant",
+        ],
+        selection_mode="single",
+        key=RESULT_VIEW_KEY,
+        width="content",
+    )
+
+    if view == "Participant":
+        _show_participant_inspector(
             result
         )
 
     else:
-        _show_participant_inspector(
+        _show_campaign_overview(
             result
         )
 
@@ -1970,6 +2943,15 @@ def render_trajectory_audit_page() -> None:
             st.session_state[
                 LAST_RUN_STATE_KEY
             ] = result
+
+            st.session_state[
+                RESULT_VIEW_KEY
+            ] = "Campaign"
+
+            st.session_state.pop(
+                PARTICIPANT_VIEW_KEY,
+                None,
+            )
 
     last_run = st.session_state.get(
         LAST_RUN_STATE_KEY

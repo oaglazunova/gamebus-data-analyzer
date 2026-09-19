@@ -6,6 +6,7 @@ import shutil
 
 import matplotlib.pyplot as plt
 import pandas as pd
+import matplotlib.dates as mdates
 
 from typing import Any, Dict, List
 from src.trajectory.candidate_patterns import (
@@ -871,6 +872,92 @@ def _case_summary(
     }
 
 
+def _format_eu_date_axis(
+    axis,
+) -> None:
+    locator = mdates.AutoDateLocator(
+        minticks=4,
+        maxticks=8,
+    )
+
+    axis.xaxis.set_major_locator(
+        locator
+    )
+
+    axis.xaxis.set_major_formatter(
+        mdates.DateFormatter(
+            "%d-%m-%Y"
+        )
+    )
+
+    axis.tick_params(
+        axis="x",
+        labelrotation=30,
+    )
+
+    for label in (
+        axis.get_xticklabels()
+    ):
+        label.set_ha(
+            "right"
+        )
+
+
+def _pattern_plot_label(
+    pattern_type: str,
+) -> str:
+    labels = {
+        (
+            "no_explicit_engagement_"
+            "observed_by_cutoff"
+        ): "No explicit engagement",
+        (
+            "navigation_without_"
+            "explicit_engagement"
+        ): "Navigation only",
+        (
+            "behavioral_sensor_without_"
+            "explicit_engagement"
+        ): "Sensor activity only",
+        (
+            "current_prolonged_"
+            "inactivity_7d"
+        ): "7d inactivity",
+        (
+            "current_prolonged_"
+            "inactivity_14d"
+        ): "14d inactivity",
+        (
+            "reengaged_after_long_gap"
+        ): "Re-engagement",
+        (
+            "repeated_long_gaps"
+        ): "Repeated long gaps",
+        (
+            "recent_engagement_decline"
+        ): "Engagement decline",
+        (
+            "selective_domain_"
+            "disappearance"
+        ): "Domain disappearance",
+        (
+            "selective_tool_"
+            "disappearance"
+        ): "Tool disappearance",
+    }
+
+    text = str(
+        pattern_type
+    )
+
+    return labels.get(
+        text,
+        text.replace(
+            "_",
+            " ",
+        ),
+    )
+
 def _plot_participant_trajectory(
     participant_id: int,
     participant_state: pd.DataFrame,
@@ -943,13 +1030,20 @@ def _plot_participant_trajectory(
     )
 
     fig, axes = plt.subplots(
-        2,
+        3,
         1,
         figsize=(
             14,
-            8,
+            10,
         ),
         sharex=True,
+        gridspec_kw={
+            "height_ratios": [
+                2,
+                1,
+                2,
+            ]
+        },
     )
 
     # -------------------------------------------------
@@ -984,16 +1078,116 @@ def _plot_participant_trajectory(
 
     axes[0].set_title(
         f"Participant {participant_id} "
-        "— engagement trajectory"
+        "— engagement trajectory "
+        "and candidate changes"
     )
 
     axes[0].legend()
 
     # -------------------------------------------------
+    # Daily engagement state
+    # -------------------------------------------------
+
+    state_data = data.copy()
+
+    state_data = state_data.dropna(
+        subset=[
+            "date",
+            "engagement_state",
+        ]
+    )
+
+    state_order = [
+        "no_explicit_engagement_observed_yet",
+        "active",
+        "quiet",
+        "prolonged_inactivity_7d",
+        "prolonged_inactivity_14d",
+        "unavailable",
+    ]
+
+    state_labels = {
+        "no_explicit_engagement_observed_yet": (
+            "No engagement yet"
+        ),
+        "active": "Active",
+        "quiet": "Quiet",
+        "prolonged_inactivity_7d": (
+            "Inactivity ≥7d"
+        ),
+        "prolonged_inactivity_14d": (
+            "Inactivity ≥14d"
+        ),
+        "unavailable": "Unavailable",
+    }
+
+    state_positions = {
+        state_name: index
+        for index, state_name
+        in enumerate(
+            state_order
+        )
+    }
+
+    state_data[
+        "state_position"
+    ] = state_data[
+        "engagement_state"
+    ].map(
+        state_positions
+    )
+
+    state_data = state_data.dropna(
+        subset=[
+            "state_position"
+        ]
+    )
+
+    if not state_data.empty:
+        axes[1].scatter(
+            state_data[
+                "date"
+            ],
+            state_data[
+                "state_position"
+            ],
+            s=18,
+        )
+
+    axes[1].set_yticks(
+        list(
+            state_positions.values()
+        )
+    )
+
+    axes[1].set_yticklabels(
+        [
+            state_labels[
+                state_name
+            ]
+            for state_name in state_order
+        ],
+        fontsize=8,
+    )
+
+    axes[1].set_ylabel(
+        "Daily state"
+    )
+
+    axes[1].set_title(
+        "Engagement state over time"
+    )
+
+    axes[1].grid(
+        axis="x",
+        alpha=0.2,
+    )
+
+    # -------------------------------------------------
     # Inactivity clock
     # -------------------------------------------------
 
-    axes[1].plot(
+    axes[2].plot(
         data[
             "date"
         ],
@@ -1003,34 +1197,34 @@ def _plot_participant_trajectory(
         ),
     )
 
-    axes[1].axhline(
+    axes[2].axhline(
         7,
         linestyle="--",
         label="7-day signal",
     )
 
-    axes[1].axhline(
+    axes[2].axhline(
         14,
         linestyle="--",
         label="14-day signal",
     )
 
-    axes[1].axhline(
+    axes[2].axhline(
         21,
         linestyle=":",
         label="21-day sensitivity threshold",
     )
 
-    axes[1].set_ylabel(
+    axes[2].set_ylabel(
         "Days"
     )
 
-    axes[1].set_xlabel(
+    axes[2].set_xlabel(
         "Date"
     )
 
     # -------------------------------------------------
-    # Candidate pattern dates
+    # Candidate trajectory changes
     # -------------------------------------------------
 
     if not participant_patterns.empty:
@@ -1056,39 +1250,137 @@ def _plot_participant_trajectory(
                     "detected_at"
                 ]
             )
-        )
-
-        # Avoid excessive annotation if a future case
-        # accumulates many patterns.
-        pattern_data = (
-            pattern_data.head(
-                10
+            .sort_values(
+                "detected_at"
             )
         )
 
-        for _, pattern in (
-            pattern_data.iterrows()
-        ):
+        if not pattern_data.empty:
 
-            detected_at = (
-                pattern[
-                    "detected_at"
+            pattern_data[
+                "plot_label"
+            ] = pattern_data[
+                "pattern_type"
+            ].apply(
+                _pattern_plot_label
+            )
+
+            # Several patterns may be detected at the
+            # same point in time. Use one marker for that
+            # date and combine the labels.
+            grouped_patterns = (
+                pattern_data.groupby(
+                    "detected_at",
+                    sort=True,
+                )[
+                    "plot_label"
+                ]
+                .apply(
+                    lambda values: "\n".join(
+                        dict.fromkeys(
+                            values
+                        )
+                    )
+                )
+            )
+
+            # Keep the graph readable if a participant
+            # accumulates many candidate changes.
+            grouped_patterns = (
+                grouped_patterns.iloc[
+                    :10
                 ]
             )
 
-            axes[0].axvline(
-                detected_at,
-                linestyle=":",
-                alpha=0.5,
-            )
+            for index, (
+                    detected_at,
+                    label,
+            ) in enumerate(
+                grouped_patterns.items()
+            ):
+                for axis in axes:
+                    axis.axvline(
+                        detected_at,
+                        linestyle=":",
+                        alpha=0.65,
+                    )
 
-            axes[1].axvline(
-                detected_at,
-                linestyle=":",
-                alpha=0.5,
-            )
+                # Alternate annotation heights so labels
+                # detected close together overlap less.
+                text_y = (
+                    0.98
+                    if index % 2 == 0
+                    else 0.78
+                )
 
-    axes[1].legend()
+                axes[0].annotate(
+                    label,
+                    xy=(
+                        detected_at,
+                        text_y,
+                    ),
+                    xycoords=(
+                        "data",
+                        "axes fraction",
+                    ),
+                    xytext=(
+                        4,
+                        0,
+                    ),
+                    textcoords=(
+                        "offset points"
+                    ),
+                    rotation=90,
+                    va="top",
+                    ha="left",
+                    fontsize=8,
+                )
+
+    # -------------------------------------------------
+    # Observation cutoff
+    # -------------------------------------------------
+
+    audit_cutoff = data[
+        "date"
+    ].max()
+
+    for axis in axes:
+        axis.axvline(
+            audit_cutoff,
+            linestyle="--",
+            alpha=0.45,
+        )
+
+    axes[2].annotate(
+        "Audit cutoff",
+        xy=(
+            audit_cutoff,
+            0.98,
+        ),
+        xycoords=(
+            "data",
+            "axes fraction",
+        ),
+        xytext=(
+            -5,
+            0,
+        ),
+        textcoords=(
+            "offset points"
+        ),
+        rotation=90,
+        va="top",
+        ha="right",
+        fontsize=8,
+    )
+
+
+
+    axes[2].legend()
+
+    _format_eu_date_axis(
+        axes[2]
+    )
 
     fig.tight_layout()
 
@@ -1107,19 +1399,20 @@ def _build_cohort_domain_tool_table(
     domain_tool: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    Build daily cohort-level domain/tool activity.
+    Build daily cohort-level domain/tool evidence.
 
     Domain rows contain explicit intervention
     engagement only.
 
-    Tool rows contain all observed activity-provider
-    evidence, including passive Garmin observations.
+    Tool rows distinguish explicit engagement from
+    other observed activity.
     """
 
     columns = [
         "date",
         "dimension",
         "name",
+        "evidence_type",
         "event_count",
     ]
 
@@ -1151,9 +1444,6 @@ def _build_cohort_domain_tool_table(
     # -------------------------------------------------
     # Domains:
     # explicit intervention engagement only.
-    #
-    # event_weight prevents multi-domain events from
-    # being counted more than once in total.
     # -------------------------------------------------
 
     domain_data = data.loc[
@@ -1200,11 +1490,14 @@ def _build_cohort_domain_tool_table(
             "dimension"
         ] = "domain"
 
+        domain_rows[
+            "evidence_type"
+        ] = "explicit_engagement"
+
     # -------------------------------------------------
     # Tools:
-    # all observed activity-provider evidence.
-    #
-    # Deduplicate event/tool combinations first.
+    # preserve whether the event counts as explicit
+    # engagement.
     # -------------------------------------------------
 
     tool_data = (
@@ -1213,14 +1506,17 @@ def _build_cohort_domain_tool_table(
                 "event_id",
                 "date",
                 "tool",
+                "event_channel",
             ]
         ]
         .drop_duplicates(
             [
                 "event_id",
                 "tool",
+                "event_channel",
             ]
         )
+        .copy()
     )
 
     tool_rows = pd.DataFrame(
@@ -1228,11 +1524,25 @@ def _build_cohort_domain_tool_table(
     )
 
     if not tool_data.empty:
+        tool_data[
+            "evidence_type"
+        ] = tool_data[
+            "event_channel"
+        ].apply(
+            lambda value: (
+                "explicit_engagement"
+                if value
+                == "explicit_engagement"
+                else "other_observed_activity"
+            )
+        )
+
         tool_rows = (
             tool_data.groupby(
                 [
                     "date",
                     "tool",
+                    "evidence_type",
                 ],
                 as_index=False,
             )
@@ -1269,6 +1579,7 @@ def _build_cohort_domain_tool_table(
         .sort_values(
             [
                 "dimension",
+                "evidence_type",
                 "name",
                 "date",
             ]
@@ -1284,8 +1595,9 @@ def _plot_cohort_domain_tool(
     output_path: str,
 ) -> None:
     """
-    Plot trailing 7-day cohort activity by
-    behavioral domain and tool.
+    Plot trailing 7-day cohort evidence while
+    separating explicit engagement from other
+    observed activity.
     """
 
     if cohort_domain_tool.empty:
@@ -1333,38 +1645,79 @@ def _plot_cohort_domain_tool(
     )
 
     fig, axes = plt.subplots(
-        2,
+        3,
         1,
         figsize=(
             14,
-            8,
+            10,
         ),
         sharex=True,
     )
 
-    for axis, dimension, title in [
+    panels = [
         (
             axes[0],
             "domain",
-            "Explicit engagement by behavioral domain",
+            "explicit_engagement",
+            (
+                "Explicit engagement by "
+                "behavioral domain"
+            ),
         ),
         (
             axes[1],
             "tool",
-            "Activity evidence by tool",
+            "explicit_engagement",
+            "Explicit engagement by tool",
         ),
-    ]:
+        (
+            axes[2],
+            "tool",
+            "other_observed_activity",
+            (
+                "Other observed activity by tool "
+                "(not explicit engagement)"
+            ),
+        ),
+    ]
+
+    for (
+        axis,
+        dimension,
+        evidence_type,
+        title,
+    ) in panels:
+
         subset = data.loc[
-            data[
-                "dimension"
-            ]
-            == dimension
+            (
+                data[
+                    "dimension"
+                ]
+                == dimension
+            )
+            &
+            (
+                data[
+                    "evidence_type"
+                ]
+                == evidence_type
+            )
         ]
 
+        axis.set_title(
+            title
+        )
+
         if subset.empty:
-            axis.set_title(
-                title
+            axis.text(
+                0.5,
+                0.5,
+                "No observed events",
+                transform=axis.transAxes,
+                ha="center",
+                va="center",
             )
+
             continue
 
         daily = (
@@ -1397,18 +1750,18 @@ def _plot_cohort_domain_tool(
                 ),
             )
 
-        axis.set_title(
-            title
-        )
-
         axis.set_ylabel(
             "Events\n(trailing 7 days)"
         )
 
         axis.legend()
 
-    axes[1].set_xlabel(
+    axes[2].set_xlabel(
         "Date"
+    )
+
+    _format_eu_date_axis(
+        axes[2]
     )
 
     fig.tight_layout()
@@ -1432,20 +1785,20 @@ def _plot_domain_tool_trajectory(
     output_path: str,
 ) -> None:
     """
-    Plot trailing 7-day evidence by behavioral
-    domain and tool across the full observation
-    period.
+    Plot trailing 7-day domain/tool evidence.
 
-    Domain panel:
-        explicit intervention engagement only.
+    Panel 1:
+        explicit engagement by behavioral domain.
 
-    Tool panel:
-        all observed activity-provider evidence,
-        including Garmin behavioral observations.
+    Panel 2:
+        explicit engagement by tool.
 
-    This distinction prevents passive Garmin records
-    from being interpreted as active intervention
-    engagement.
+    Panel 3:
+        other observed activity by tool.
+
+    The third panel does not count as explicit
+    engagement and therefore does not reset the
+    engagement inactivity clock.
     """
 
     if (
@@ -1460,14 +1813,11 @@ def _plot_domain_tool_trajectory(
     )
 
     if not data.empty:
-
-        data["date"] = (
-            pd.to_datetime(
-                data[
-                    "date"
-                ],
-                errors="coerce",
-            )
+        data["date"] = pd.to_datetime(
+            data[
+                "date"
+            ],
+            errors="coerce",
         )
 
         data[
@@ -1485,28 +1835,19 @@ def _plot_domain_tool_trajectory(
             ]
         )
 
-    # -------------------------------------------------
-    # Use the ParticipantState window, not merely
-    # first/last domain activity.
-    #
-    # This ensures that disappearance remains visible
-    # all the way to the analysis cutoff.
-    # -------------------------------------------------
-
     state = (
         participant_state
         .copy()
     )
 
     if not state.empty:
-
-        state["date"] = (
-            pd.to_datetime(
-                state[
-                    "date"
-                ],
-                errors="coerce",
-            )
+        state[
+            "date"
+        ] = pd.to_datetime(
+            state[
+                "date"
+            ],
+            errors="coerce",
         )
 
         state_dates = (
@@ -1517,89 +1858,73 @@ def _plot_domain_tool_trajectory(
         )
 
     else:
-
         state_dates = pd.Series(
             dtype="datetime64[ns]"
         )
 
     if not state_dates.empty:
-
-        start = (
-            state_dates.min()
-        )
-
-        end = (
-            state_dates.max()
-        )
+        start = state_dates.min()
+        end = state_dates.max()
 
     elif not data.empty:
+        start = data[
+            "date"
+        ].min()
 
-        start = (
-            data[
-                "date"
-            ].min()
-        )
-
-        end = (
-            data[
-                "date"
-            ].max()
-        )
+        end = data[
+            "date"
+        ].max()
 
     else:
-
         return
 
-    full_dates = (
-        pd.date_range(
-            start=start,
-            end=end,
-            freq="D",
-        )
+    full_dates = pd.date_range(
+        start=start,
+        end=end,
+        freq="D",
     )
 
     fig, axes = plt.subplots(
-        2,
+        3,
         1,
         figsize=(
             14,
-            8,
+            10,
         ),
         sharex=True,
     )
 
-    # =================================================
-    # DOMAIN PANEL
-    # Explicit engagement only
-    # =================================================
+    # -------------------------------------------------
+    # Explicit engagement by behavioral domain
+    # -------------------------------------------------
 
     if not data.empty:
-
-        domain_data = (
-            data.loc[
-                (
-                    data[
-                        "event_channel"
-                    ]
-                    == "explicit_engagement"
-                )
-                &
-                (
-                    data[
-                        "domain"
-                    ]
-                    != "unmapped"
-                )
-            ]
-            .copy()
-        )
+        domain_data = data.loc[
+            (
+                data[
+                    "event_channel"
+                ]
+                == "explicit_engagement"
+            )
+            &
+            (
+                data[
+                    "domain"
+                ]
+                != "unmapped"
+            )
+        ].copy()
 
     else:
-
         domain_data = pd.DataFrame()
 
-    if not domain_data.empty:
+    axes[0].set_title(
+        f"Participant {participant_id} "
+        "— explicit engagement by "
+        "behavioral domain"
+    )
 
+    if not domain_data.empty:
         domain_daily = (
             domain_data.groupby(
                 [
@@ -1631,7 +1956,6 @@ def _plot_domain_tool_trajectory(
         for domain in (
             domain_rolling.columns
         ):
-
             axes[0].plot(
                 domain_rolling.index,
                 domain_rolling[
@@ -1644,47 +1968,113 @@ def _plot_domain_tool_trajectory(
 
         axes[0].legend()
 
+    else:
+        axes[0].text(
+            0.5,
+            0.5,
+            "No explicit domain engagement",
+            transform=axes[0].transAxes,
+            ha="center",
+            va="center",
+        )
+
     axes[0].set_ylabel(
-        "Explicit weighted events\n"
+        "Weighted events\n"
         "(trailing 7 days)"
     )
 
-    axes[0].set_title(
-        f"Participant {participant_id} "
-        "— domain/tool trajectory"
-    )
-
-    # =================================================
-    # TOOL PANEL
-    # All observed activity providers
-    # =================================================
+    # -------------------------------------------------
+    # Tool evidence
+    # -------------------------------------------------
 
     if not data.empty:
-
         tool_events = (
             data[
                 [
                     "event_id",
                     "date",
                     "tool",
+                    "event_channel",
                 ]
             ]
             .drop_duplicates(
                 [
                     "event_id",
                     "tool",
+                    "event_channel",
                 ]
             )
+            .copy()
         )
 
     else:
-
         tool_events = pd.DataFrame()
 
     if not tool_events.empty:
+        tool_events[
+            "evidence_type"
+        ] = tool_events[
+            "event_channel"
+        ].apply(
+            lambda value: (
+                "explicit_engagement"
+                if value
+                == "explicit_engagement"
+                else "other_observed_activity"
+            )
+        )
+
+    tool_panels = [
+        (
+            axes[1],
+            "explicit_engagement",
+            "Explicit engagement by tool",
+        ),
+        (
+            axes[2],
+            "other_observed_activity",
+            (
+                "Other observed activity by tool "
+                "(not explicit engagement)"
+            ),
+        ),
+    ]
+
+    for (
+        axis,
+        evidence_type,
+        title,
+    ) in tool_panels:
+
+        axis.set_title(
+            title
+        )
+
+        if tool_events.empty:
+            subset = pd.DataFrame()
+
+        else:
+            subset = tool_events.loc[
+                tool_events[
+                    "evidence_type"
+                ]
+                == evidence_type
+            ]
+
+        if subset.empty:
+            axis.text(
+                0.5,
+                0.5,
+                "No observed events",
+                transform=axis.transAxes,
+                ha="center",
+                va="center",
+            )
+
+            continue
 
         tool_daily = (
-            tool_events.groupby(
+            subset.groupby(
                 [
                     "date",
                     "tool",
@@ -1712,8 +2102,7 @@ def _plot_domain_tool_trajectory(
         for tool in (
             tool_rolling.columns
         ):
-
-            axes[1].plot(
+            axis.plot(
                 tool_rolling.index,
                 tool_rolling[
                     tool
@@ -1723,26 +2112,30 @@ def _plot_domain_tool_trajectory(
                 ),
             )
 
-        axes[1].legend()
+        axis.legend()
 
     axes[1].set_ylabel(
-        "Activity-provider events\n"
+        "Explicit events\n"
         "(trailing 7 days)"
     )
 
-    axes[1].set_xlabel(
+    axes[2].set_ylabel(
+        "Observed events\n"
+        "(trailing 7 days)"
+    )
+
+    axes[2].set_xlabel(
         "Date"
     )
 
-    # Explicitly span the complete observation window.
-    axes[0].set_xlim(
-        start,
-        end,
-    )
+    for axis in axes:
+        axis.set_xlim(
+            start,
+            end,
+        )
 
-    axes[1].set_xlim(
-        start,
-        end,
+    _format_eu_date_axis(
+        axes[2]
     )
 
     fig.tight_layout()
@@ -1866,6 +2259,10 @@ def _plot_cohort_engagement(
 
     ax.legend()
 
+    _format_eu_date_axis(
+        ax
+    )
+
     fig.tight_layout()
 
     fig.savefig(
@@ -1958,6 +2355,11 @@ def run_case_export(
         "plots",
     )
 
+    participant_plots_dir = os.path.join(
+        plots_dir,
+        "participants",
+    )
+
     # -------------------------------------------------
     # Case selection can change between audit runs.
     #
@@ -1980,6 +2382,11 @@ def run_case_export(
 
     os.makedirs(
         plots_dir,
+        exist_ok=True,
+    )
+
+    os.makedirs(
+        participant_plots_dir,
         exist_ok=True,
     )
 
@@ -2046,6 +2453,92 @@ def run_case_export(
         cohort_domain_tool,
         cohort_domain_tool_plot_path,
     )
+
+    # -------------------------------------------------
+    # Participant trajectory plots.
+    #
+    # These are produced for every participant in the
+    # audit, not only for the diversified case sample.
+    # The canonical participant data remain in the
+    # audit-level CSV files; only the visualizations
+    # are stored separately here.
+    # -------------------------------------------------
+
+    if (
+            not state.empty
+            and "participant_id"
+            in state.columns
+    ):
+        participant_ids = (
+            pd.to_numeric(
+                state[
+                    "participant_id"
+                ],
+                errors="coerce",
+            )
+            .dropna()
+            .astype(int)
+            .drop_duplicates()
+            .sort_values()
+            .tolist()
+        )
+
+        for participant_id in participant_ids:
+            participant_state = (
+                _filter_participant(
+                    state,
+                    participant_id,
+                )
+            )
+
+            participant_patterns = (
+                _filter_participant(
+                    patterns,
+                    participant_id,
+                )
+            )
+
+            participant_domain_tool = (
+                _filter_participant(
+                    domain_tool,
+                    participant_id,
+                )
+            )
+
+            participant_plot_path = (
+                os.path.join(
+                    participant_plots_dir,
+                    (
+                        f"participant_"
+                        f"{participant_id}_trajectory.png"
+                    ),
+                )
+            )
+
+            _plot_participant_trajectory(
+                participant_id,
+                participant_state,
+                participant_patterns,
+                participant_plot_path,
+            )
+
+            domain_tool_plot_path = (
+                os.path.join(
+                    participant_plots_dir,
+                    (
+                        f"participant_"
+                        f"{participant_id}_domain_tool.png"
+                    ),
+                )
+            )
+
+            _plot_domain_tool_trajectory(
+                participant_id,
+                participant_domain_tool,
+                participant_state,
+                domain_tool_plot_path,
+            )
+
 
     # -------------------------------------------------
     # Select diverse participant cases.

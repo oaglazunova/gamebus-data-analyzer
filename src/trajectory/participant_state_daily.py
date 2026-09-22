@@ -32,6 +32,10 @@ STATE_COLUMNS = [
     "engagement_state",
     "has_ever_engaged",
 
+    "analysis_phase",
+    "maintenance_reengagement_eligible",
+    "first_observed_explicit_engagement_date",
+
     "last_explicit_engagement_date",
     "days_since_last_explicit_engagement",
 
@@ -418,6 +422,22 @@ def _add_engagement_state(
 
         result["has_ever_engaged"] = pd.NA
 
+        result["analysis_phase"] = (
+            "unavailable"
+        )
+
+        result[
+            "maintenance_reengagement_eligible"
+        ] = pd.Series(
+            pd.NA,
+            index=result.index,
+            dtype="boolean",
+        )
+
+        result[
+            "first_observed_explicit_engagement_date"
+        ] = pd.NaT
+
         result[
             "last_explicit_engagement_date"
         ] = pd.NaT
@@ -440,13 +460,62 @@ def _add_engagement_state(
     # Has participant engaged by this day?
     # -------------------------------------------------
 
-    result["has_ever_engaged"] = (
+    active = (
+            result["explicit_events_today"] > 0
+    )
+
+    cumulative_explicit = (
         result
         .groupby("participant_id")[
             "explicit_events_today"
         ]
         .cumsum()
-        .gt(0)
+    )
+
+    result["has_ever_engaged"] = (
+        cumulative_explicit.gt(0)
+    )
+
+    previous_explicit_total = (
+            cumulative_explicit
+            - result["explicit_events_today"]
+    )
+
+    first_explicit_today = (
+            active
+            & previous_explicit_total.eq(0)
+    )
+
+    result[
+        "first_observed_explicit_engagement_date"
+    ] = result["date"].where(
+        first_explicit_today
+    )
+
+    result[
+        "first_observed_explicit_engagement_date"
+    ] = (
+        result
+        .groupby("participant_id")[
+            "first_observed_explicit_engagement_date"
+        ]
+        .ffill()
+    )
+
+    result["analysis_phase"] = (
+        "before_first_observed_explicit_engagement"
+    )
+
+    result.loc[
+        result["has_ever_engaged"],
+        "analysis_phase",
+    ] = "maintenance_reengagement"
+
+    result[
+        "maintenance_reengagement_eligible"
+    ] = (
+        result["has_ever_engaged"]
+        .astype("boolean")
     )
 
     # -------------------------------------------------
@@ -490,10 +559,6 @@ def _add_engagement_state(
 
     result["engagement_state"] = (
         "no_explicit_engagement_observed_yet"
-    )
-
-    active = (
-        result["explicit_events_today"] > 0
     )
 
     result.loc[

@@ -22,6 +22,7 @@ from src.trajectory.audit_run import (
     TrajectoryAuditRunError,
     read_campaign_export_participant_ids,
     read_campaign_identity,
+    read_configured_campaign_end,
 )
 
 
@@ -45,22 +46,18 @@ class TrajectorySourceParticipant:
 )
 class TrajectoryAuditSource:
     source_type: str
-
     staging_dir: Path
-
     campaign_data_path: Path
     campaign_description_path: Path
-
     campaign_abbreviation: str | None
     campaign_id: str | None
-
     participants: tuple[
         TrajectorySourceParticipant,
         ...
     ]
-
     accounts_without_pid: int = 0
     snapshot_time: datetime | None = None
+    configured_end: datetime | None = None
 
 
 def _normalize_pid(
@@ -197,6 +194,19 @@ def prepare_uploaded_trajectory_source(
             description_path
         )
 
+        configured_end_timestamp = (
+            read_configured_campaign_end(
+                description_path
+            )
+        )
+
+        configured_end = (
+            configured_end_timestamp.to_pydatetime()
+            if configured_end_timestamp
+            is not None
+            else None
+        )
+
         participant_ids = (
             read_campaign_export_participant_ids(
                 data_path
@@ -237,6 +247,9 @@ def prepare_uploaded_trajectory_source(
             ),
             participants=(
                 participants
+            ),
+            configured_end=(
+                configured_end
             ),
         )
 
@@ -367,6 +380,19 @@ def prepare_gamebus_trajectory_source(
                 f"{data_campaign_id}"
             )
 
+        configured_end_timestamp = (
+            read_configured_campaign_end(
+                description_path
+            )
+        )
+
+        configured_end = (
+            configured_end_timestamp.to_pydatetime()
+            if configured_end_timestamp
+            is not None
+            else None
+        )
+
         campaign_id = (
             description_campaign_id
         )
@@ -463,6 +489,9 @@ def prepare_gamebus_trajectory_source(
             ),
             snapshot_time=(
                 snapshot_time
+            ),
+            configured_end=(
+                configured_end
             ),
         )
 

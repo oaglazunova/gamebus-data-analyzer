@@ -50,7 +50,24 @@ from src.trajectory.case_export import (
 from src.trajectory.engagement import (
     explicit_engagement_mask,
 )
-
+from src.trajectory.participant_day_features import (
+    run_participant_day_features,
+)
+from src.trajectory.participant_day_outcomes import (
+    run_participant_day_outcomes,
+)
+from src.trajectory.participant_day_modeling import (
+    run_participant_day_modeling_table,
+)
+from src.trajectory.rule_baseline_evaluation import (
+    run_rule_baseline_evaluation,
+)
+from src.trajectory.individualized_change_detector import (
+    run_individualized_change_detection,
+)
+from src.trajectory.method_comparison import (
+    run_method_comparison,
+)
 
 
 TrajectoryProgressCallback = Callable[
@@ -1055,12 +1072,152 @@ def run_trajectory_audit(
     )
 
     # -------------------------------------------------
-    # 9. Data quality
+    # 9. Participant-day features
     # -------------------------------------------------
 
     print()
     print(
-        "[9/11] Data quality"
+        "[9/15] Participant-day features"
+    )
+
+    _notify_progress(
+        progress_callback,
+        "participant_day_features",
+        "Building longitudinal participant-day features",
+    )
+
+    participant_day_features = (
+        run_participant_day_features(
+            config
+        )
+    )
+
+    results[
+        "participant_day_features"
+    ] = participant_day_features
+
+    # -------------------------------------------------
+    # 10. Participant-day outcomes
+    # -------------------------------------------------
+
+    print()
+    print(
+        "[10/15] Participant-day outcomes"
+    )
+
+    _notify_progress(
+        progress_callback,
+        "participant_day_outcomes",
+        (
+            "Constructing right-censored "
+            "maintenance/re-engagement outcomes"
+        ),
+    )
+
+    results[
+        "participant_day_outcomes"
+    ] = run_participant_day_outcomes(
+        config,
+        participant_day_features,
+    )
+
+    # -------------------------------------------------
+    # 11. Participant-day modeling table
+    # -------------------------------------------------
+
+    print()
+    print(
+        "[11/15] Participant-day modeling table"
+    )
+
+    _notify_progress(
+        progress_callback,
+        "participant_day_modeling",
+        "Joining causal features with retrospective outcomes",
+    )
+
+    participant_day_modeling = (
+        run_participant_day_modeling_table(
+            config,
+            participant_day_features,
+            results[
+                "participant_day_outcomes"
+            ],
+        )
+    )
+
+    results[
+        "participant_day_modeling"
+    ] = participant_day_modeling
+
+    # -------------------------------------------------
+    # 12. Rule baseline evaluation
+    # -------------------------------------------------
+
+    print()
+    print(
+        "[12/15] Rule baseline evaluation"
+    )
+
+    _notify_progress(
+        progress_callback,
+        "rule_baseline_evaluation",
+        (
+            "Evaluating fixed inactivity rules "
+            "against future outcomes"
+        ),
+    )
+
+    results[
+        "rule_baseline_evaluation"
+    ] = run_rule_baseline_evaluation(
+        config,
+        participant_day_modeling,
+    )
+
+    # -------------------------------------------------
+    # 13. Individualized change detection
+    # -------------------------------------------------
+
+    print()
+    print(
+        "[13/16] Individualized change detection"
+    )
+
+    _notify_progress(
+        progress_callback,
+        "individualized_change_detection",
+        (
+            "Detecting participant-specific "
+            "engagement changes"
+        ),
+    )
+
+    results[
+        "individualized_change_detection"
+    ] = run_individualized_change_detection(
+        config,
+        participant_day_features,
+    )
+
+    individualized_change_detection = (
+        run_individualized_change_detection(
+            config,
+            participant_day_features,
+        )
+    )
+
+    results[
+        "individualized_change_detection"
+    ] = individualized_change_detection
+
+    # -------------------------------------------------
+    # 11. Data quality
+    # -------------------------------------------------
+
+    print()
+    print(
+        "[11/15] Data quality"
     )
 
     _notify_progress(
@@ -1076,12 +1233,38 @@ def run_trajectory_audit(
     )
 
     # -------------------------------------------------
+    # 14. Method comparison
+    # -------------------------------------------------
+
+    print()
+    print(
+        "[14/17] Method comparison"
+    )
+
+    _notify_progress(
+        progress_callback,
+        "method_comparison",
+        (
+            "Comparing fixed inactivity rules "
+            "with individualized change detection"
+        ),
+    )
+
+    results[
+        "method_comparison"
+    ] = run_method_comparison(
+        config,
+        participant_day_modeling,
+        individualized_change_detection,
+    )
+    
+    # -------------------------------------------------
     # 10. Candidate patterns
     # -------------------------------------------------
 
     print()
     print(
-        "[10/11] Candidate patterns"
+        "[12/15] Candidate patterns"
     )
 
     _notify_progress(
@@ -1102,7 +1285,7 @@ def run_trajectory_audit(
 
     print()
     print(
-        "[11/11] Case exports and plots"
+        "[13/15] Case exports and plots"
     )
 
     _notify_progress(

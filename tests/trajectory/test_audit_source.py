@@ -99,6 +99,26 @@ def _campaign_xlsx_bytes() -> bytes:
                 sheet_name="campaigns",
                 index=False,
             )
+            pd.DataFrame(
+                {
+                    "id": [
+                        560,
+                        561,
+                    ],
+                    "start": [
+                        "2025-01-01T00:00:00Z",
+                        "2025-03-01T00:00:00Z",
+                    ],
+                    "end": [
+                        "2025-02-28T23:59:59Z",
+                        "2025-08-30T17:00:00Z",
+                    ],
+                }
+            ).to_excel(
+                writer,
+                sheet_name="waves",
+                index=False,
+            )
 
         return path.read_bytes()
 
@@ -168,6 +188,15 @@ class TestTrajectoryAuditSource(
                 source
                 .campaign_description_path
                 .exists()
+            )
+
+            self.assertIsNotNone(
+                source.configured_end
+            )
+
+            self.assertEqual(
+                source.configured_end.isoformat(),
+                "2025-08-30T17:00:00+00:00",
             )
 
         finally:

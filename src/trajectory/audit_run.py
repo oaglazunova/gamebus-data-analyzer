@@ -244,6 +244,46 @@ def read_campaign_identity(
     )
 
 
+
+def read_configured_campaign_end(
+    campaign_description_path: str | Path,
+) -> pd.Timestamp | None:
+    """
+    Read the latest configured wave end from the
+    campaign-description workbook.
+
+    This is campaign-design metadata. It is not
+    automatically treated as the observation cutoff.
+    """
+    sheets, _ = load_campaign_desc(
+        str(
+            campaign_description_path
+        )
+    )
+
+    waves = sheets.get(
+        "waves",
+        pd.DataFrame(),
+    )
+
+    if (
+        waves.empty
+        or "end" not in waves.columns
+    ):
+        return None
+
+    ends = pd.to_datetime(
+        waves["end"],
+        utc=True,
+        errors="coerce",
+    ).dropna()
+
+    if ends.empty:
+        return None
+
+    return ends.max()
+
+
 def _safe_component(
     value: str | None,
     fallback: str,

@@ -4,7 +4,12 @@ import pandas as pd
 
 from src.trajectory.candidate_patterns import (
     _add_cutoff_patterns,
+    _add_domain_disappearance_patterns,
+    _add_tool_disappearance_patterns,
     _quality_lookup,
+)
+from src.trajectory.common import (
+    TrajectoryAuditConfig,
 )
 
 
@@ -275,6 +280,31 @@ class TestCandidatePatternSemantics(
             pattern_types,
         )
 
+        pattern = patterns.iloc[
+            0
+        ]
+
+        self.assertEqual(
+            pattern["signal_date"],
+            pd.Timestamp(
+                "2026-09-07",
+                tz="UTC",
+            ),
+        )
+
+        self.assertEqual(
+            pattern["assessment_date"],
+            self.cutoff,
+        )
+
+        self.assertEqual(
+            pattern["detected_at"],
+            pd.Timestamp(
+                "2026-09-07",
+                tz="UTC",
+            ),
+        )
+
     def test_insufficient_core_data_suppresses_behavioral_pattern(
         self,
     ):
@@ -303,6 +333,189 @@ class TestCandidatePatternSemantics(
 
         self.assertTrue(
             patterns.empty
+        )
+
+    def test_domain_disappearance_is_suppressed_when_overall_engagement_collapses(
+        self,
+    ):
+        rows = []
+
+        data = []
+
+        # Reference window:
+        # 8 nutrition + 8 physical-activity events.
+        for index in range(8):
+            data.append(
+                {
+                    "event_id": f"n{index}",
+                    "participant_id": 10,
+                    "date": pd.Timestamp(
+                        "2026-08-01",
+                        tz="UTC",
+                    ),
+                    "event_channel": (
+                        "explicit_engagement"
+                    ),
+                    "domain": "nutrition",
+                    "tool": "GameBus",
+                    "event_weight": 1.0,
+                }
+            )
+
+            data.append(
+                {
+                    "event_id": f"p{index}",
+                    "participant_id": 10,
+                    "date": pd.Timestamp(
+                        "2026-08-01",
+                        tz="UTC",
+                    ),
+                    "event_channel": (
+                        "explicit_engagement"
+                    ),
+                    "domain": (
+                        "physical_activity"
+                    ),
+                    "tool": "GameBus",
+                    "event_weight": 1.0,
+                }
+            )
+
+        # Recent window: only one event elsewhere.
+        data.append(
+            {
+                "event_id": "recent",
+                "participant_id": 10,
+                "date": pd.Timestamp(
+                    "2026-09-01",
+                    tz="UTC",
+                ),
+                "event_channel": (
+                    "explicit_engagement"
+                ),
+                "domain": (
+                    "physical_activity"
+                ),
+                "tool": "GameBus",
+                "event_weight": 1.0,
+            }
+        )
+
+        _add_domain_disappearance_patterns(
+            rows=rows,
+            quality_lookup={},
+            domain_tool=pd.DataFrame(
+                data
+            ),
+            config=TrajectoryAuditConfig(),
+            cutoff=self.cutoff,
+        )
+
+        self.assertFalse(
+            any(
+                row["pattern_type"]
+                == "selective_domain_disappearance"
+                for row in rows
+            )
+        )
+
+    def test_domain_disappearance_requires_meaningful_continuation_elsewhere(
+        self,
+    ):
+        rows = []
+
+        data = []
+
+        # Reference:
+        # nutrition = 4, physical activity = 6.
+        for index in range(4):
+            data.append(
+                {
+                    "event_id": f"n{index}",
+                    "participant_id": 11,
+                    "date": pd.Timestamp(
+                        "2026-08-01",
+                        tz="UTC",
+                    ),
+                    "event_channel": (
+                        "explicit_engagement"
+                    ),
+                    "domain": "nutrition",
+                    "tool": "GameBus",
+                    "event_weight": 1.0,
+                }
+            )
+
+        for index in range(6):
+            data.append(
+                {
+                    "event_id": f"p{index}",
+                    "participant_id": 11,
+                    "date": pd.Timestamp(
+                        "2026-08-01",
+                        tz="UTC",
+                    ),
+                    "event_channel": (
+                        "explicit_engagement"
+                    ),
+                    "domain": (
+                        "physical_activity"
+                    ),
+                    "tool": "GameBus",
+                    "event_weight": 1.0,
+                }
+            )
+
+        # Recent:
+        # nutrition disappears, but physical activity
+        # remains substantial: 6 / 10 = 0.60.
+        for index in range(6):
+            data.append(
+                {
+                    "event_id": f"r{index}",
+                    "participant_id": 11,
+                    "date": pd.Timestamp(
+                        "2026-09-01",
+                        tz="UTC",
+                    ),
+                    "event_channel": (
+                        "explicit_engagement"
+                    ),
+                    "domain": (
+                        "physical_activity"
+                    ),
+                    "tool": "GameBus",
+                    "event_weight": 1.0,
+                }
+            )
+
+        _add_domain_disappearance_patterns(
+            rows=rows,
+            quality_lookup={},
+            domain_tool=pd.DataFrame(
+                data
+            ),
+            config=TrajectoryAuditConfig(),
+            cutoff=self.cutoff,
+        )
+
+        patterns = [
+            row
+            for row in rows
+            if (
+                row["pattern_type"]
+                == "selective_domain_disappearance"
+            )
+        ]
+
+        self.assertEqual(
+            len(patterns),
+            1,
+        )
+
+        self.assertEqual(
+            patterns[0]["subject"],
+            "nutrition",
         )
 
 

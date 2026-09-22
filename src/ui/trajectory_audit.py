@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
 import json
-import tkinter as tk
+import html
+
+from pathlib import Path
 from tkinter import filedialog
 
+import tkinter as tk
 import pandas as pd
 import streamlit as st
 
@@ -62,6 +64,69 @@ RESULT_VIEW_KEY = (
 PARTICIPANT_VIEW_KEY = (
     "trajectory_result_participant"
 )
+HISTORICAL_CUTOFF_KEY = (
+    "trajectory_historical_cutoff"
+)
+HISTORICAL_CUTOFF_CONFIRMED_KEY = (
+    "trajectory_historical_cutoff_confirmed"
+)
+
+GRAPH_EXPLANATIONS = {
+    "cohort_engagement": (
+        "Each line shows how many included participants are in a given "
+        "engagement state on each day. Active means that at least one "
+        "explicit engagement event was recorded on that day. Quiet means "
+        "the participant has engaged before, but has had no explicit "
+        "engagement today and the last explicit engagement was no more "
+        "than 6 days ago. Inactivity ≥7d means 7–13 days since the last "
+        "explicit engagement; Inactivity ≥14d means 14 or more days. "
+        "No engagement yet means that no explicit engagement has been "
+        "observed for that participant up to that date. Unavailable means "
+        "the required activity data stream was not available. These states "
+        "describe recorded interaction with the intervention; they do not "
+        "represent physical activity, health status, or motivation."
+    ),
+
+    "participant_trajectory": (
+        "The top panel shows recorded explicit engagement. Bars are the "
+        "number of explicit engagement events on that day. The line is "
+        "the total number of explicit engagement events during the "
+        "trailing 7 calendar days: the current day plus the previous "
+        "6 days. The middle panel shows the participant's daily engagement "
+        "state. The bottom panel is the inactivity clock: the number of "
+        "days since the last explicit engagement, which returns to 0 when "
+        "a new explicit engagement event occurs. Navigation, notifications "
+        "and passive sensor observations do not count as explicit "
+        "engagement and therefore do not reset the inactivity clock. "
+        "Dashed markers indicate candidate trajectory patterns detected "
+        "by the audit."
+    ),
+
+    "cohort_domain_tool": (
+        "All panels use a trailing 7-day window and aggregate evidence "
+        "across the included campaign participants. The first panel shows "
+        "explicit engagement by behavioral domain. Domain activity is "
+        "weighted, so one activity associated with several domains can be "
+        "split across those domains rather than counted several times. "
+        "The second panel shows explicit engagement events by tool. "
+        "The third panel shows other observed activity, such as navigation "
+        "or passive observations. Activity in the third panel is evidence "
+        "that data were observed, but it is not treated as explicit "
+        "engagement and does not reset the inactivity clock."
+    ),
+
+    "participant_domain_tool": (
+        "All panels use a trailing 7-day window for this participant. "
+        "The first panel shows explicit engagement by behavioral domain. "
+        "Domain activity is weighted, so a single multi-domain activity "
+        "may contribute fractions to several domains. The second panel "
+        "shows explicit engagement events by tool. The third panel shows "
+        "other observed activity by tool, including activity that does not "
+        "represent deliberate intervention interaction. Events in the "
+        "third panel do not count as explicit engagement and do not reset "
+        "the participant's inactivity clock."
+    ),
+}
 
 
 def _choose_directory(
@@ -158,6 +223,16 @@ def _remove_loaded_source() -> None:
 
     st.session_state.pop(
         COHORT_EDITOR_KEY,
+        None,
+    )
+
+    st.session_state.pop(
+        HISTORICAL_CUTOFF_KEY,
+        None,
+    )
+
+    st.session_state.pop(
+        HISTORICAL_CUTOFF_CONFIRMED_KEY,
         None,
     )
 
@@ -664,6 +739,129 @@ def _render_storage() -> Path:
         output_root_text
         or DEFAULT_TRAJECTORY_AUDITS_DIR
     ).expanduser()
+
+
+
+def _render_observation_cutoff(
+    source: TrajectoryAuditSource,
+) -> tuple[
+    str | None,
+    str | None,
+    bool,
+]:
+    """
+    Resolve the observation cutoff for the current
+    trajectory-audit source.
+
+    Live GameBus audits use the snapshot time
+    automatically.
+
+    Historical uploads require an explicit researcher
+    confirmation of the last date on which activity
+    could have been observed.
+    """
+    st.subheader(
+        "Observation cutoff"
+    )
+
+    if source.source_type == "gamebus":
+        if source.snapshot_time is None:
+            st.error(
+                "The live GameBus snapshot does not "
+                "contain a retrieval timestamp."
+            )
+
+            return (
+                None,
+                None,
+                False,
+            )
+
+        st.caption(
+            "This is a live GameBus snapshot. "
+            "The observation period ends when the "
+            "campaign snapshot was retrieved."
+        )
+
+        st.write(
+            "Snapshot date: "
+            f"**{_format_date(source.snapshot_time)}**"
+        )
+
+        return (
+            source.snapshot_time.isoformat(),
+            "live_snapshot_time",
+            True,
+        )
+
+    configured_date = None
+
+    if source.configured_end is not None:
+        configured_date = (
+            source.configured_end.date()
+        )
+
+        st.write(
+            "Configured campaign end: "
+            f"**{_format_date(source.configured_end)}**"
+        )
+
+        st.caption(
+            "The configured campaign end is metadata "
+            "from the campaign definition. Confirm it "
+            "only if it is also the last date on which "
+            "participant activity could have been "
+            "observed."
+        )
+
+    else:
+        st.warning(
+            "No configured campaign end could be read "
+            "from the campaign description. Enter the "
+            "last date on which participant activity "
+            "could have been observed."
+        )
+
+    cutoff_date = st.date_input(
+        "Last observable activity date",
+        value=configured_date,
+        format="DD-MM-YYYY",
+        key=HISTORICAL_CUTOFF_KEY,
+    )
+
+    confirmed = st.checkbox(
+        (
+            "I confirm that this is the last date on "
+            "which participant activity could have "
+            "been observed."
+        ),
+        key=HISTORICAL_CUTOFF_CONFIRMED_KEY,
+    )
+
+    if cutoff_date is None:
+        return (
+            None,
+            None,
+            False,
+        )
+
+    cutoff_source = (
+        "user_confirmed_configured_end"
+        if (
+            configured_date is not None
+            and cutoff_date == configured_date
+        )
+        else "user_provided_historical_cutoff"
+    )
+
+    return (
+        cutoff_date.isoformat(),
+        cutoff_source,
+        bool(
+            confirmed
+        ),
+    )
+
 
 
 def _show_source_summary(
@@ -1200,6 +1398,130 @@ def _build_participant_status_table(
 
 
 
+def _graph_help(
+    explanation_key: str,
+) -> None:
+    """
+    Show a compact explanation below a graph.
+
+    The detailed text appears when the user hovers
+    over, or keyboard-focuses, the information icon.
+    """
+
+    explanation = (
+        GRAPH_EXPLANATIONS.get(
+            explanation_key,
+            "",
+        )
+    )
+
+    if not explanation:
+        return
+
+    safe_explanation = html.escape(
+        explanation
+    )
+
+    st.markdown(
+        f"""
+        <style>
+        .trajectory-graph-help {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            margin-top: 0.15rem;
+            margin-bottom: 0.6rem;
+            font-size: 0.82rem;
+            color: #6b7280;
+        }}
+
+        .trajectory-graph-help-trigger {{
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            cursor: help;
+            outline: none;
+        }}
+
+        .trajectory-graph-help-icon {{
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.05rem;
+            height: 1.05rem;
+            border: 1px solid currentColor;
+            border-radius: 50%;
+            font-size: 0.72rem;
+            font-weight: 700;
+            line-height: 1;
+        }}
+
+        .trajectory-graph-help-tooltip {{
+            visibility: hidden;
+            opacity: 0;
+            position: absolute;
+            left: 0;
+            bottom: calc(100% + 0.55rem);
+            z-index: 9999;
+
+            width: min(34rem, 78vw);
+            padding: 0.75rem 0.85rem;
+
+            background: #262730;
+            color: white;
+
+            border-radius: 0.45rem;
+
+            font-size: 0.82rem;
+            line-height: 1.45;
+            text-align: left;
+            white-space: normal;
+
+            transition: opacity 0.12s ease;
+            pointer-events: none;
+        }}
+
+        .trajectory-graph-help-trigger:hover
+        .trajectory-graph-help-tooltip,
+        .trajectory-graph-help-trigger:focus
+        .trajectory-graph-help-tooltip {{
+            visibility: visible;
+            opacity: 1;
+        }}
+        </style>
+
+        <div class="trajectory-graph-help">
+            <span
+                class="trajectory-graph-help-trigger"
+                tabindex="0"
+                aria-label="How to read this graph"
+            >
+                <span
+                    class="trajectory-graph-help-icon"
+                    aria-hidden="true"
+                >
+                    i
+                </span>
+
+                <span>
+                    How to read this graph
+                </span>
+
+                <span
+                    class="trajectory-graph-help-tooltip"
+                    role="tooltip"
+                >
+                    {safe_explanation}
+                </span>
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+
 def _show_campaign_overview(
     result,
 ) -> None:
@@ -1335,6 +1657,10 @@ def _show_campaign_overview(
             use_container_width=True,
         )
 
+        _graph_help(
+            "cohort_engagement"
+        )
+
     else:
         st.info(
             "No cohort engagement plot was produced "
@@ -1361,6 +1687,10 @@ def _show_campaign_overview(
                 domain_tool_plot
             ),
             use_container_width=True,
+        )
+
+        _graph_help(
+            "cohort_domain_tool"
         )
 
         st.caption(
@@ -2028,6 +2358,9 @@ def _show_participant_inspector(
             ),
             use_container_width=True,
         )
+        _graph_help(
+            "participant_trajectory"
+        )
 
     else:
         st.info(
@@ -2059,6 +2392,9 @@ def _show_participant_inspector(
                 domain_tool_plot
             ),
             use_container_width=True,
+        )
+        _graph_help(
+            "participant_domain_tool"
         )
 
         st.caption(
@@ -2831,6 +3167,14 @@ def render_trajectory_audit_page() -> None:
     )
 
     (
+        analysis_cutoff,
+        analysis_cutoff_source,
+        cutoff_ready,
+    ) = _render_observation_cutoff(
+        source
+    )
+
+    (
         candidate_ids,
         selected_ids,
     ) = _render_cohort_editor(
@@ -2844,7 +3188,8 @@ def render_trajectory_audit_page() -> None:
         type="primary",
         use_container_width=True,
         disabled=(
-            not selected_ids
+                not selected_ids
+                or not cutoff_ready
         ),
     )
 
@@ -2898,6 +3243,12 @@ def render_trajectory_audit_page() -> None:
                     ),
                     source_type=(
                         source.source_type
+                    ),
+                    analysis_cutoff=(
+                        analysis_cutoff
+                    ),
+                    analysis_cutoff_source=(
+                        analysis_cutoff_source
                     ),
                     output_root=(
                         output_root

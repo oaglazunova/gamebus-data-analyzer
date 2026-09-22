@@ -41,6 +41,10 @@ PATTERN_COLUMNS = [
     "pattern_family",
     "subject",
 
+    "signal_date",
+    "assessment_date",
+
+    # Backward-compatible alias for signal_date.
     "detected_at",
 
     "status",
@@ -244,6 +248,7 @@ def _append_pattern(
     detected_at: Any,
     evidence: Dict[str, Any],
     right_censored: bool = False,
+    assessment_date: Any | None = None,
 ) -> None:
     """
     Add one exploratory candidate pattern.
@@ -285,6 +290,18 @@ def _append_pattern(
                 subject
             ),
 
+            "signal_date": (
+                detected_at
+            ),
+
+            "assessment_date": (
+                assessment_date
+                if assessment_date is not None
+                else detected_at
+            ),
+
+            # Keep temporarily for compatibility
+            # with existing UI/export code.
             "detected_at": (
                 detected_at
             ),
@@ -631,6 +648,20 @@ def _add_cutoff_patterns(
             engagement_state
             == "prolonged_inactivity_7d"
         ):
+            last_explicit = pd.to_datetime(
+                current[
+                    "last_explicit_engagement_date"
+                ],
+                utc=True,
+                errors="coerce",
+            )
+
+            signal_date = (
+                last_explicit
+                + pd.Timedelta(days=7)
+                if pd.notna(last_explicit)
+                else pd.NaT
+            )
 
             _append_pattern(
                 rows,
@@ -642,8 +673,18 @@ def _add_cutoff_patterns(
                 ),
                 "inactivity",
                 None,
-                cutoff,
+                signal_date,
                 {
+                    "threshold_days": 7,
+
+                    "signal_date": (
+                        signal_date
+                    ),
+
+                    "assessment_date": (
+                        cutoff
+                    ),
+
                     "days_since_last_explicit_engagement": (
                         current[
                             "days_since_last_explicit_engagement"
@@ -657,12 +698,27 @@ def _add_cutoff_patterns(
                     ),
                 },
                 right_censored=True,
+                assessment_date=cutoff,
             )
 
         elif (
             engagement_state
             == "prolonged_inactivity_14d"
         ):
+            last_explicit = pd.to_datetime(
+                current[
+                    "last_explicit_engagement_date"
+                ],
+                utc=True,
+                errors="coerce",
+            )
+
+            signal_date = (
+                last_explicit
+                + pd.Timedelta(days=14)
+                if pd.notna(last_explicit)
+                else pd.NaT
+            )
 
             _append_pattern(
                 rows,
@@ -674,8 +730,18 @@ def _add_cutoff_patterns(
                 ),
                 "inactivity",
                 None,
-                cutoff,
+                signal_date,
                 {
+                    "threshold_days": 14,
+
+                    "signal_date": (
+                        signal_date
+                    ),
+
+                    "assessment_date": (
+                        cutoff
+                    ),
+
                     "days_since_last_explicit_engagement": (
                         current[
                             "days_since_last_explicit_engagement"
@@ -689,6 +755,7 @@ def _add_cutoff_patterns(
                     ),
                 },
                 right_censored=True,
+                assessment_date=cutoff,
             )
 
 
@@ -1059,11 +1126,15 @@ def _add_domain_disappearance_patterns(
         domain has zero weighted events
         in the recent window
 
-        participant still has explicit engagement
-        in some OTHER domain recently
+        participant still has meaningful explicit
+        engagement in OTHER domains recently
 
-    Therefore global inactivity does not generate
-    three redundant domain-disappearance patterns.
+        overall recent engagement has not itself
+        fallen to the configured decline threshold
+
+    Therefore global engagement decline does not
+    generate redundant selective-disappearance
+    patterns.
     """
 
     if domain_tool.empty:
@@ -1154,6 +1225,15 @@ def _add_domain_disappearance_patterns(
         .sum()
     )
 
+    reference_total_by_participant = (
+        reference.groupby(
+            "participant_id"
+        )[
+            "event_weight"
+        ]
+        .sum()
+    )
+
     reference_domain = (
         reference.groupby(
             [
@@ -1211,9 +1291,37 @@ def _add_domain_disappearance_patterns(
             )
         )
 
-        # Participant must still be explicitly
-        # engaging elsewhere.
-        if recent_total <= 0:
+        reference_total = float(
+            reference_total_by_participant.get(
+                participant_id,
+                0.0,
+            )
+        )
+
+        if reference_total <= 0:
+            continue
+
+        overall_retained_ratio = (
+            recent_total
+            / reference_total
+        )
+
+        # A disappearance is only selective when
+        # meaningful engagement continues elsewhere.
+        #
+        # If overall engagement has also collapsed,
+        # treat that as a broader engagement decline
+        # rather than a selective domain change.
+        if (
+            recent_total
+            < config.pattern_min_reference_events
+        ):
+            continue
+
+        if (
+            overall_retained_ratio
+            <= config.pattern_decline_ratio
+        ):
             continue
 
         _append_pattern(
@@ -1247,6 +1355,24 @@ def _add_domain_disappearance_patterns(
                         recent_total,
                         4,
                     )
+                ),
+
+                "reference_total_explicit_weight": (
+                    round(
+                        reference_total,
+                        4,
+                    )
+                ),
+
+                "overall_recent_to_reference_ratio": (
+                    round(
+                        overall_retained_ratio,
+                        4,
+                    )
+                ),
+
+                "global_decline_ratio_threshold": (
+                    config.pattern_decline_ratio
                 ),
 
                 "reference_start": (
@@ -1384,6 +1510,13 @@ def _add_tool_disappearance_patterns(
         .size()
     )
 
+    reference_total_by_participant = (
+        reference.groupby(
+            "participant_id"
+        )
+        .size()
+    )
+
     reference_tool = (
         reference.groupby(
             [
@@ -1446,9 +1579,35 @@ def _add_tool_disappearance_patterns(
             )
         )
 
-        # Require continued observation through
-        # another tool.
-        if recent_total <= 0:
+        reference_total = int(
+            reference_total_by_participant.get(
+                participant_id,
+                0,
+            )
+        )
+
+        if reference_total <= 0:
+            continue
+
+        overall_retained_ratio = (
+            recent_total
+            / reference_total
+        )
+
+        # Require meaningful continued observation
+        # through other tools. A near-global collapse
+        # is not interpreted as selective tool
+        # disappearance.
+        if (
+            recent_total
+            < config.pattern_min_reference_events
+        ):
+            continue
+
+        if (
+            overall_retained_ratio
+            <= config.pattern_decline_ratio
+        ):
             continue
 
         _append_pattern(
@@ -1472,6 +1631,21 @@ def _add_tool_disappearance_patterns(
 
                 "recent_events_other_tools": (
                     recent_total
+                ),
+
+                "reference_events_all_tools": (
+                    reference_total
+                ),
+
+                "overall_recent_to_reference_ratio": (
+                    round(
+                        overall_retained_ratio,
+                        4,
+                    )
+                ),
+
+                "global_decline_ratio_threshold": (
+                    config.pattern_decline_ratio
                 ),
 
                 "reference_start": (
@@ -1626,20 +1800,25 @@ def build_candidate_patterns(
         rows
     )
 
-    result[
-        "detected_at"
-    ] = pd.to_datetime(
+    for column in (
+        "signal_date",
+        "assessment_date",
+        "detected_at",
+    ):
         result[
-            "detected_at"
-        ],
-        utc=True,
-        errors="coerce",
-    )
+            column
+        ] = pd.to_datetime(
+            result[
+                column
+            ],
+            utc=True,
+            errors="coerce",
+        )
 
     result = result.sort_values(
         [
             "participant_id",
-            "detected_at",
+            "signal_date",
             "pattern_family",
             "pattern_type",
             "subject",
@@ -1686,14 +1865,19 @@ def build_candidate_patterns(
         ]
     )
 
-    result[
-        "detected_at"
-    ] = (
+    for column in (
+        "signal_date",
+        "assessment_date",
+        "detected_at",
+    ):
         result[
-            "detected_at"
-        ]
-        .dt.date
-    )
+            column
+        ] = (
+            result[
+                column
+            ]
+            .dt.date
+        )
 
     for column in PATTERN_COLUMNS:
 

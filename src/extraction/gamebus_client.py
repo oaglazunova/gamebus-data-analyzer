@@ -407,81 +407,77 @@ class GameBusClient:
         if game_descriptor not in VALID_GAME_DESCRIPTORS:
             logger.warning(f"Game descriptor '{game_descriptor}' not in VALID_GAME_DESCRIPTORS. Attempting to use it anyway.")
 
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Origin": "https://base.healthyw8.gamebus.eu",
-            "Referer": "https://base.healthyw8.gamebus.eu/",
-            "Accept": "application/json, text/plain, */*"
-        }
-
         # Construct URL based on game descriptor
-        urls_to_try = []
+        # Fetch only the explicitly requested descriptor.
+        # Do not fall back to the unfiltered activities endpoint:
+        # that would return the participant's complete activity history
+        # and could incorrectly be treated as data for this descriptor.
+        data_url = (
+                self.activities_url + "&gds={}"
+        ).format(user_id, game_descriptor)
 
-        # Standard URL format with gds parameter
-        urls_to_try.append((self.activities_url + "&gds={}").format(user_id, game_descriptor))
+        all_user_data, all_raw_responses = self._fetch_paginated_data(
+            data_url,
+            token,
+            page_size
+        )
 
-        # Try without any game descriptor filter
-        urls_to_try.append(self.activities_url.format(user_id))
+        # Cache only the result for this exact descriptor.
+        self._cache[cache_key] = (
+            all_user_data,
+            all_raw_responses
+        )
 
-        # Use the first URL as the default
-        data_url = urls_to_try[0]
-
-        # If we're trying all descriptors, we'll only use the first URL for now
-        # The other URLs will be tried later if needed
-        if not try_all_descriptors:
-            # Try each URL until we get data
-            for url in urls_to_try:
-                # Check if this URL is already in cache
-                url_cache_key = f"{user_id}_{url}"
-                if url_cache_key in self._cache:
-                    temp_data, temp_raw_responses = self._cache[url_cache_key]
-                else:
-                    temp_data, temp_raw_responses = self._fetch_paginated_data(url, token, page_size)
-                    # Cache the result
-                    self._cache[url_cache_key] = (temp_data, temp_raw_responses)
-
-                if temp_data:
-                    # Cache the result for the original cache key
-                    self._cache[cache_key] = (temp_data, temp_raw_responses)
-                    return temp_data, game_descriptor, temp_raw_responses
-
-            # If we didn't find any data, use the default URL and continue with the normal flow
-            logger.warning(f"No data found with any URL format. Using default URL: {data_url}")
-
-        # Use the _fetch_paginated_data method to get the data
-        all_user_data, all_raw_responses = self._fetch_paginated_data(data_url, token, page_size)
-        # Cache the result
-        self._cache[cache_key] = (all_user_data, all_raw_responses)
-        # If data was found, return it with the original game descriptor
         if all_user_data:
-            return all_user_data, game_descriptor, all_raw_responses
+            return (
+                all_user_data,
+                game_descriptor,
+                all_raw_responses
+            )
 
-        # If no data was found and try_all_descriptors is True, try all valid game descriptors
+        # If explicitly requested, try the other configured descriptors.
+        # Each descriptor is queried using its own gds filter.
         if try_all_descriptors:
-            # Try all valid game descriptors
-            descriptors_to_try = [d for d in VALID_GAME_DESCRIPTORS if d != game_descriptor]
+            descriptors_to_try = [
+                descriptor
+                for descriptor in VALID_GAME_DESCRIPTORS
+                if descriptor != game_descriptor
+            ]
 
             for descriptor in descriptors_to_try:
-                # Check if this descriptor is already in cache
                 descriptor_cache_key = f"{user_id}_{descriptor}"
+
                 if descriptor_cache_key in self._cache:
-                    descriptor_data, descriptor_raw_responses = self._cache[descriptor_cache_key]
-                    if descriptor_data:
-                        # Cache the result for the original cache key
-                        self._cache[cache_key] = (descriptor_data, descriptor_raw_responses)
-                        return descriptor_data, descriptor, descriptor_raw_responses
+                    descriptor_data, descriptor_raw_responses = (
+                        self._cache[descriptor_cache_key]
+                    )
+                else:
+                    descriptor_url = (
+                            self.activities_url + "&gds={}"
+                    ).format(user_id, descriptor)
 
-                try:
-                    # Recursive call with the new descriptor, but don't try all descriptors again
-                    descriptor_data, actual_descriptor, descriptor_raw_responses = self.get_user_data(token, user_id, descriptor, page_size, try_all_descriptors=False)
-                    if descriptor_data:
-                        # Cache the result for the original cache key
-                        self._cache[cache_key] = (descriptor_data, descriptor_raw_responses)
-                        return descriptor_data, actual_descriptor, descriptor_raw_responses
-                except Exception as e:
-                    logger.warning(f"Error trying game descriptor '{descriptor}': {e}")
-                    continue
+                    descriptor_data, descriptor_raw_responses = (
+                        self._fetch_paginated_data(
+                            descriptor_url,
+                            token,
+                            page_size
+                        )
+                    )
 
-            logger.warning("No data found with any of the valid game descriptors")
+                    self._cache[descriptor_cache_key] = (
+                        descriptor_data,
+                        descriptor_raw_responses
+                    )
 
-        return all_user_data, game_descriptor, all_raw_responses
+                if descriptor_data:
+                    return (
+                        descriptor_data,
+                        descriptor,
+                        descriptor_raw_responses
+                    )
+
+            logger.warning(
+                "No data found with any of the valid game descriptors"
+            )
+
+        return [], game_descriptor, all_raw_responses
